@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
 import { format, formatDistanceToNow } from 'date-fns'
 import {
@@ -74,6 +75,9 @@ interface SessionOption {
 export default function GalleryPage() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
   // State
   const [page, setPage] = useState(1)
@@ -93,11 +97,13 @@ export default function GalleryPage() {
 
   // Fetch gallery
   const { data: galleryData, isLoading } = useQuery({
-    queryKey: ['gallery', page, eventId, sessionId],
+    queryKey: ['gallery', page, eventId, sessionId, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' })
       if (eventId && eventId !== 'all') params.set('eventId', eventId)
       if (sessionId && sessionId !== 'all') params.set('sessionId', sessionId)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
       const res = await fetch(`/api/gallery?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to fetch gallery')
@@ -105,11 +111,14 @@ export default function GalleryPage() {
     },
   })
 
-  // Fetch events for filters
+  // Fetch events for filters - scoped to org
   const { data: eventsData } = useQuery({
-    queryKey: ['events-list'],
+    queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: async () => {
-      const res = await fetch('/api/events?limit=100')
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/events?${params.toString()}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
@@ -118,10 +127,12 @@ export default function GalleryPage() {
 
   // Fetch sessions for filters (filtered by event)
   const { data: sessionsData } = useQuery({
-    queryKey: ['sessions-list', eventId],
+    queryKey: ['sessions-list', eventId, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: '100' })
       if (eventId && eventId !== 'all') params.set('eventId', eventId)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
       const res = await fetch(`/api/sessions?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
@@ -131,10 +142,13 @@ export default function GalleryPage() {
 
   // Fetch sessions for form (filtered by selected form event)
   const { data: formSessionsData } = useQuery({
-    queryKey: ['form-sessions', formEventId],
+    queryKey: ['form-sessions', formEventId, currentRole, currentOrgId],
     queryFn: async () => {
       if (!formEventId) return { data: [] }
-      const res = await fetch(`/api/sessions?eventId=${formEventId}&limit=100`)
+      const params = new URLSearchParams({ eventId: formEventId, limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/sessions?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
@@ -164,7 +178,7 @@ export default function GalleryPage() {
       const res = await fetch('/api/gallery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, userRole: currentRole, userOrgId: currentOrgId }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to upload photo')

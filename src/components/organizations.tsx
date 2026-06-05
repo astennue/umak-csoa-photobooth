@@ -2,8 +2,9 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
-import { Building2, Plus, Search, Pencil, Trash2, MoreHorizontal } from 'lucide-react'
+import { Building2, Plus, Search, Pencil, Trash2, MoreHorizontal, Shield } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,6 +53,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 
 // --- Types ---
 interface Organization {
@@ -91,47 +93,17 @@ const defaultFormData: OrgFormData = {
   active: true,
 }
 
-// --- API helpers ---
-async function fetchOrganizations(page: number, limit: number, search: string): Promise<OrgsResponse> {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) })
-  if (search) params.set('search', search)
-  const res = await fetch(`/api/organizations?${params.toString()}`)
-  if (!res.ok) throw new Error('Failed to fetch organizations')
-  return res.json()
-}
-
-async function createOrganization(data: OrgFormData): Promise<Organization> {
-  const res = await fetch('/api/organizations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json.error || 'Failed to create organization')
-  return json.data
-}
-
-async function updateOrganization(id: string, data: Partial<OrgFormData>): Promise<Organization> {
-  const res = await fetch(`/api/organizations/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json.error || 'Failed to update organization')
-  return json.data
-}
-
-async function deleteOrganization(id: string): Promise<void> {
-  const res = await fetch(`/api/organizations/${id}`, { method: 'DELETE' })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json.error || 'Failed to delete organization')
-}
-
 // --- Component ---
 export default function OrganizationsPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+  const currentOrgName = (session?.user as any)?.organizationName as string | undefined
+
+  const isOrgScoped = currentRole === 'ORG_ADMIN' || currentRole === 'FACILITATOR'
+  const canManageOrgs = currentRole === 'SUPER_ADMIN'
 
   // State
   const [page, setPage] = useState(1)
@@ -148,15 +120,32 @@ export default function OrganizationsPage() {
   const [formData, setFormData] = useState<OrgFormData>(defaultFormData)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
-  // Query
+  // Query - scoped to org for ORG_ADMIN/FACILITATOR
   const { data, isLoading } = useQuery({
-    queryKey: ['organizations', page, limit, debouncedSearch],
-    queryFn: () => fetchOrganizations(page, limit, debouncedSearch),
+    queryKey: ['organizations', page, limit, debouncedSearch, currentRole, currentOrgId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+      if (search) params.set('search', debouncedSearch)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/organizations?${params.toString()}`)
+      if (!res.ok) throw new Error('Failed to fetch organizations')
+      return res.json()
+    },
   })
 
   // Mutations
   const createMutation = useMutation({
-    mutationFn: createOrganization,
+    mutationFn: async (data: OrgFormData) => {
+      const res = await fetch('/api/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, userRole: currentRole }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to create organization')
+      return json.data
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
       toast({ title: 'Organization created', description: 'The organization has been created successfully.' })
@@ -169,7 +158,16 @@ export default function OrganizationsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<OrgFormData> }) => updateOrganization(id, data),
+    mutationFn: async ({ id, data }: { id: string; data: Partial<OrgFormData> }) => {
+      const res = await fetch(`/api/organizations/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, userRole: currentRole }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to update organization')
+      return json.data
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
       toast({ title: 'Organization updated', description: 'The organization has been updated successfully.' })
@@ -182,7 +180,13 @@ export default function OrganizationsPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: deleteOrganization,
+    mutationFn: async (id: string) => {
+      const params = new URLSearchParams()
+      if (currentRole) params.set('userRole', currentRole)
+      const res = await fetch(`/api/organizations/${id}?${params.toString()}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to delete organization')
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
       toast({ title: 'Organization deleted', description: 'The organization has been deleted successfully.' })
@@ -257,6 +261,65 @@ export default function OrganizationsPage() {
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const organizations = data?.data ?? []
 
+  // For ORG_ADMIN/FACILITATOR: show a detail view of their own org
+  if (isOrgScoped && organizations.length === 1) {
+    const org = organizations[0]
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">My Organization</h1>
+          <p className="text-muted-foreground">View your organization details.</p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-12 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                <Building2 className="size-6 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <CardTitle className="text-xl">{org.name}</CardTitle>
+                <CardDescription>Your organization</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {org.description && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Description</Label>
+                <p className="text-sm mt-1">{org.description}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {org.email && (
+                <div>
+                  <Label className="text-xs text-muted-foreground">Email</Label>
+                  <p className="text-sm mt-1">{org.email}</p>
+                </div>
+              )}
+              {org.phone && (
+                <div>
+                  <Label className="text-xs text-muted-foreground">Phone</Label>
+                  <p className="text-sm mt-1">{org.phone}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-4 pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <Badge variant={org.active ? 'default' : 'secondary'}>
+                  {org.active ? 'Active' : 'Inactive'}
+                </Badge>
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {org._count.events} event{org._count.events !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -265,10 +328,12 @@ export default function OrganizationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
           <p className="text-muted-foreground">Manage your photobooth organizations and their settings.</p>
         </div>
-        <Button onClick={() => { resetForm(); setCreateOpen(true) }}>
-          <Plus className="size-4 mr-2" />
-          Add Organization
-        </Button>
+        {canManageOrgs && (
+          <Button onClick={() => { resetForm(); setCreateOpen(true) }}>
+            <Plus className="size-4 mr-2" />
+            Add Organization
+          </Button>
+        )}
       </div>
 
       {/* Search */}
@@ -292,7 +357,7 @@ export default function OrganizationsPage() {
               <TableHead className="hidden lg:table-cell">Phone</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-center">Events</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {canManageOrgs && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -304,12 +369,12 @@ export default function OrganizationsPage() {
                   <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
+                  {canManageOrgs && <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>}
                 </TableRow>
               ))
             ) : organizations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={canManageOrgs ? 6 : 5} className="h-24 text-center text-muted-foreground">
                   {debouncedSearch ? 'No organizations found matching your search.' : 'No organizations yet. Create one to get started!'}
                 </TableCell>
               </TableRow>
@@ -351,29 +416,31 @@ export default function OrganizationsPage() {
                   <TableCell className="text-center">
                     <span className="text-sm font-medium">{org._count.events}</span>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <MoreHorizontal className="size-4" />
-                          <span className="sr-only">Actions</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEdit(org)}>
-                          <Pencil className="size-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteClick(org)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="size-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+                  {canManageOrgs && (
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="size-8">
+                            <MoreHorizontal className="size-4" />
+                            <span className="sr-only">Actions</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEdit(org)}>
+                            <Pencil className="size-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteClick(org)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="size-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -417,174 +484,180 @@ export default function OrganizationsPage() {
         </div>
       )}
 
-      {/* Create Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Create Organization</DialogTitle>
-            <DialogDescription>Add a new organization to the system.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="create-name">Name *</Label>
-              <Input
-                id="create-name"
-                value={formData.name}
-                onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Organization name"
-              />
-              {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="create-description">Description</Label>
-              <Textarea
-                id="create-description"
-                value={formData.description}
-                onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Brief description"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Create Dialog - SUPER_ADMIN only */}
+      {canManageOrgs && (
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Create Organization</DialogTitle>
+              <DialogDescription>Add a new organization to the system.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="create-email">Email</Label>
+                <Label htmlFor="create-name">Name *</Label>
                 <Input
-                  id="create-email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
-                  placeholder="contact@org.com"
+                  id="create-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Organization name"
                 />
-                {formErrors.email && <p className="text-xs text-destructive">{formErrors.email}</p>}
+                {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="create-phone">Phone</Label>
-                <Input
-                  id="create-phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
-                  placeholder="+1 (555) 000-0000"
+                <Label htmlFor="create-description">Description</Label>
+                <Textarea
+                  id="create-description"
+                  value={formData.description}
+                  onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Brief description"
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="create-email">Email</Label>
+                  <Input
+                    id="create-email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="contact@org.com"
+                  />
+                  {formErrors.email && <p className="text-xs text-destructive">{formErrors.email}</p>}
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="create-phone">Phone</Label>
+                  <Input
+                    id="create-phone"
+                    value={formData.phone}
+                    onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="+1 (555) 000-0000"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="create-active">Active</Label>
+                  <p className="text-xs text-muted-foreground">Enable this organization for use</p>
+                </div>
+                <Switch
+                  id="create-active"
+                  checked={formData.active}
+                  onCheckedChange={(checked) => setFormData((f) => ({ ...f, active: checked }))}
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="create-active">Active</Label>
-                <p className="text-xs text-muted-foreground">Enable this organization for use</p>
-              </div>
-              <Switch
-                id="create-active"
-                checked={formData.active}
-                onCheckedChange={(checked) => setFormData((f) => ({ ...f, active: checked }))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setCreateOpen(false); resetForm() }}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              {createMutation.isPending ? 'Creating...' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setCreateOpen(false); resetForm() }}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreate} disabled={createMutation.isPending}>
+                {createMutation.isPending ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      {/* Edit Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit Organization</DialogTitle>
-            <DialogDescription>Update organization details.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-name">Name *</Label>
-              <Input
-                id="edit-name"
-                value={formData.name}
-                onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Organization name"
-              />
-              {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-description">Description</Label>
-              <Textarea
-                id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Brief description"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Edit Dialog - SUPER_ADMIN only */}
+      {canManageOrgs && (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Edit Organization</DialogTitle>
+              <DialogDescription>Update organization details.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-email">Email</Label>
+                <Label htmlFor="edit-name">Name *</Label>
                 <Input
-                  id="edit-email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
-                  placeholder="contact@org.com"
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Organization name"
                 />
-                {formErrors.email && <p className="text-xs text-destructive">{formErrors.email}</p>}
+                {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-phone">Phone</Label>
-                <Input
-                  id="edit-phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
-                  placeholder="+1 (555) 000-0000"
+                <Label htmlFor="edit-description">Description</Label>
+                <Textarea
+                  id="edit-description"
+                  value={formData.description}
+                  onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Brief description"
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-email">Email</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="contact@org.com"
+                  />
+                  {formErrors.email && <p className="text-xs text-destructive">{formErrors.email}</p>}
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-phone">Phone</Label>
+                  <Input
+                    id="edit-phone"
+                    value={formData.phone}
+                    onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="+1 (555) 000-0000"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="edit-active">Active</Label>
+                  <p className="text-xs text-muted-foreground">Enable this organization for use</p>
+                </div>
+                <Switch
+                  id="edit-active"
+                  checked={formData.active}
+                  onCheckedChange={(checked) => setFormData((f) => ({ ...f, active: checked }))}
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="edit-active">Active</Label>
-                <p className="text-xs text-muted-foreground">Enable this organization for use</p>
-              </div>
-              <Switch
-                id="edit-active"
-                checked={formData.active}
-                onCheckedChange={(checked) => setFormData((f) => ({ ...f, active: checked }))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setEditOpen(false); resetForm() }}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setEditOpen(false); resetForm() }}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete <strong>{selectedOrg?.name}</strong>? This action cannot be undone.
-              All associated events and data will also be permanently removed.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              disabled={deleteMutation.isPending}
-              className="bg-destructive text-white hover:bg-destructive/90"
-            >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Delete Confirmation - SUPER_ADMIN only */}
+      {canManageOrgs && (
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete <strong>{selectedOrg?.name}</strong>? This action cannot be undone.
+                All associated events and data will also be permanently removed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteConfirm}
+                disabled={deleteMutation.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }

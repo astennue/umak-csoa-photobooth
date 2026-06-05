@@ -43,11 +43,30 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, email, role, organizationId, active, password } = body
+    const { name, email, role, organizationId, active, password, userRole, userOrgId } = body
 
     const existing = await db.user.findUnique({ where: { id } })
     if (!existing) {
       return errorResponse('User not found', 404)
+    }
+
+    // RBAC: ORG_ADMIN can only edit FACILITATOR accounts in their own org
+    if (userRole === 'ORG_ADMIN' && userOrgId) {
+      if (existing.role !== 'FACILITATOR') {
+        return errorResponse('You can only edit Facilitator accounts', 403)
+      }
+      if (existing.organizationId !== userOrgId) {
+        return errorResponse('You can only edit users in your organization', 403)
+      }
+      // Cannot change role away from FACILITATOR
+      if (role && role !== 'FACILITATOR') {
+        return errorResponse('You can only assign Facilitator role', 403)
+      }
+    }
+
+    // RBAC: FACILITATOR cannot edit any accounts
+    if (userRole === 'FACILITATOR') {
+      return errorResponse('Facilitators cannot edit user accounts', 403)
     }
 
     // Check email uniqueness if email is being changed
@@ -62,7 +81,14 @@ export async function PUT(
     if (name !== undefined) data.name = name
     if (email !== undefined) data.email = email
     if (role !== undefined) data.role = role
-    if (organizationId !== undefined) data.organizationId = organizationId || null
+    if (organizationId !== undefined) {
+      // ORG_ADMIN must keep users in their own org
+      if (userRole === 'ORG_ADMIN' && userOrgId) {
+        data.organizationId = userOrgId
+      } else {
+        data.organizationId = organizationId || null
+      }
+    }
     if (active !== undefined) data.active = active
     if (password) {
       data.password = await bcrypt.hash(password, 12)
@@ -96,9 +122,29 @@ export async function DELETE(
   try {
     const { id } = await params
 
+    // RBAC: Check via query params
+    const searchParams = new URL(request.url).searchParams
+    const userRole = searchParams.get('userRole') || ''
+    const userOrgId = searchParams.get('userOrgId') || ''
+
+    // FACILITATOR cannot delete users
+    if (userRole === 'FACILITATOR') {
+      return errorResponse('Facilitators cannot delete user accounts', 403)
+    }
+
     const existing = await db.user.findUnique({ where: { id } })
     if (!existing) {
       return errorResponse('User not found', 404)
+    }
+
+    // ORG_ADMIN can only delete FACILITATOR accounts in their own org
+    if (userRole === 'ORG_ADMIN' && userOrgId) {
+      if (existing.role !== 'FACILITATOR') {
+        return errorResponse('You can only delete Facilitator accounts', 403)
+      }
+      if (existing.organizationId !== userOrgId) {
+        return errorResponse('You can only delete users in your organization', 403)
+      }
     }
 
     await db.user.delete({ where: { id } })

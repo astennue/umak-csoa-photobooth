@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import {
@@ -85,6 +86,9 @@ const emptyForm: TemplateFormData = {
 export default function TemplatesPage() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
   // State
   const [page, setPage] = useState(1)
@@ -94,12 +98,14 @@ export default function TemplatesPage() {
   const [editingTemplate, setEditingTemplate] = useState<TemplateItem | null>(null)
   const [form, setForm] = useState<TemplateFormData>(emptyForm)
 
-  // Fetch templates
+  // Fetch templates - scoped to org
   const { data: templatesData, isLoading } = useQuery({
-    queryKey: ['templates', page, filterEventId],
+    queryKey: ['templates', page, filterEventId, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '10' })
       if (filterEventId && filterEventId !== 'all') params.set('eventId', filterEventId)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
       const res = await fetch(`/api/templates?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to fetch templates')
@@ -107,11 +113,14 @@ export default function TemplatesPage() {
     },
   })
 
-  // Fetch events for filters and forms
+  // Fetch events for filters and forms - scoped to org
   const { data: eventsData } = useQuery({
-    queryKey: ['events-list'],
+    queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: async () => {
-      const res = await fetch('/api/events?limit=100')
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/events?${params.toString()}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
@@ -136,6 +145,8 @@ export default function TemplatesPage() {
           overlayUrl: data.overlayUrl || null,
           settings: data.settings ? (isValidJson(data.settings) ? JSON.parse(data.settings) : data.settings) : null,
           active: data.active,
+          userRole: currentRole,
+          userOrgId: currentOrgId,
         }),
       })
       const json = await res.json()

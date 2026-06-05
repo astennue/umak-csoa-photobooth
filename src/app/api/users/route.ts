@@ -7,6 +7,8 @@ export async function GET(request: NextRequest) {
     const { limit, skip } = paginateRequest(request)
     const searchParams = getSearchParams(request)
     const search = searchParams.get('search') || ''
+    const userRole = searchParams.get('userRole') || ''
+    const userOrgId = searchParams.get('userOrgId') || ''
 
     const where: any = {}
     if (search) {
@@ -14,6 +16,15 @@ export async function GET(request: NextRequest) {
         { name: { contains: search } },
         { email: { contains: search } },
       ]
+    }
+
+    // RBAC: ORG_ADMIN can only see users in their own org
+    if (userRole === 'ORG_ADMIN' && userOrgId) {
+      where.organizationId = userOrgId
+    }
+    // FACILITATOR can only see users in their own org
+    if (userRole === 'FACILITATOR' && userOrgId) {
+      where.organizationId = userOrgId
     }
 
     const [users, total] = await Promise.all([

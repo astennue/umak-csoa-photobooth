@@ -42,13 +42,21 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
+    const { userRole, userOrgId, ...updateData } = body;
 
     const existing = await db.event.findUnique({ where: { id } });
     if (!existing) {
       return errorResponse('Event not found', 404);
     }
 
-    const { name, description, location, startDate, endDate, status, maxSessions } = body;
+    // RBAC: ORG_ADMIN and FACILITATOR can only edit events in their org
+    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
+      if (existing.organizationId !== userOrgId) {
+        return errorResponse('You can only edit events in your organization', 403);
+      }
+    }
+
+    const { name, description, location, startDate, endDate, status, maxSessions } = updateData;
 
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       return errorResponse('Name must be a non-empty string', 400);

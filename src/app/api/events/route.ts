@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
+import { applyOrgFilter } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,6 +10,8 @@ export async function GET(request: NextRequest) {
     const organizationId = searchParams.get('organizationId') || '';
     const status = searchParams.get('status') || '';
     const search = searchParams.get('search') || '';
+    const userRole = searchParams.get('userRole') || '';
+    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (organizationId) where.organizationId = organizationId;
@@ -20,6 +23,9 @@ export async function GET(request: NextRequest) {
         { location: { contains: search } },
       ];
     }
+
+    // Apply RBAC: ORG_ADMIN and FACILITATOR can only see their own org's events
+    applyOrgFilter(where, userRole, userOrgId);
 
     const [items, total] = await Promise.all([
       db.event.findMany({
@@ -44,12 +50,23 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, description, organizationId, location, startDate, endDate, status, maxSessions } = body;
+    const { name, description, organizationId, location, startDate, endDate, status, maxSessions, userRole, userOrgId } = body;
 
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return errorResponse('Name is required and must be a non-empty string', 400);
     }
-    if (!organizationId || typeof organizationId !== 'string' || organizationId.trim() === '') {
+
+    // Determine the effective organizationId
+    let effectiveOrgId = organizationId;
+    // RBAC: ORG_ADMIN and FACILITATOR can only create events for their own org
+    if (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') {
+      if (!userOrgId) {
+        return errorResponse('You are not assigned to an organization', 403);
+      }
+      effectiveOrgId = userOrgId;
+    }
+
+    if (!effectiveOrgId || typeof effectiveOrgId !== 'string' || effectiveOrgId.trim() === '') {
       return errorResponse('Organization ID is required', 400);
     }
     if (!startDate) {
@@ -62,7 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify organization exists
-    const org = await db.organization.findUnique({ where: { id: organizationId } });
+    const org = await db.organization.findUnique({ where: { id: effectiveOrgId } });
     if (!org) {
       return errorResponse('Organization not found', 400);
     }
@@ -71,7 +88,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: name.trim(),
         description: description?.trim() || null,
-        organizationId,
+        organizationId: effectiveOrgId,
         location: location?.trim() || null,
         startDate: new Date(startDate),
         endDate: endDate ? new Date(endDate) : null,

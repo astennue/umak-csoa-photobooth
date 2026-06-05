@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import {
   Card,
   CardContent,
@@ -390,10 +391,20 @@ function RecentSessionsTable({ sessions }: RecentSessionsTableProps) {
 
 export default function DashboardPage() {
   const { setCurrentPage } = useAppStore()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+
+  // Build analytics URL with user scope
+  const analyticsParams = new URLSearchParams()
+  if (currentRole && currentOrgId) {
+    analyticsParams.set('userRole', currentRole)
+    analyticsParams.set('userOrgId', currentOrgId)
+  }
 
   const { data, isLoading, isError } = useQuery<AnalyticsResponse>({
-    queryKey: ['analytics'],
-    queryFn: () => fetch('/api/analytics').then((r) => r.json()),
+    queryKey: ['analytics', currentRole, currentOrgId],
+    queryFn: () => fetch(`/api/analytics?${analyticsParams.toString()}`).then((r) => r.json()),
   })
 
   const analytics = data?.data

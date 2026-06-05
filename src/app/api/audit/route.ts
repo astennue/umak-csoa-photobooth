@@ -10,9 +10,18 @@ export async function GET(request: NextRequest) {
     const eventId = searchParams.get('eventId') || '';
     const action = searchParams.get('action') || '';
     const entityType = searchParams.get('entityType') || '';
+    const userRole = searchParams.get('userRole') || '';
+    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
-    if (organizationId) where.organizationId = organizationId;
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only see audit logs for their own org
+    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
+      where.organizationId = userOrgId;
+    } else if (organizationId) {
+      where.organizationId = organizationId;
+    }
+
     if (eventId) where.eventId = eventId;
     if (action) where.action = action;
     if (entityType) where.entityType = entityType;

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
+import { applyEventOrgFilter } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,11 +10,16 @@ export async function GET(request: NextRequest) {
     const eventId = searchParams.get('eventId') || '';
     const status = searchParams.get('status') || '';
     const type = searchParams.get('type') || '';
+    const userRole = searchParams.get('userRole') || '';
+    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (eventId) where.eventId = eventId;
     if (status) where.status = status;
     if (type) where.type = type;
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only see devices for their org's events
+    applyEventOrgFilter(where, userRole, userOrgId);
 
     const [items, total] = await Promise.all([
       db.device.findMany({
@@ -35,7 +41,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { eventId, name, type, status, ipAddress, firmware } = body;
+    const { eventId, name, type, status, ipAddress, firmware, userRole, userOrgId } = body;
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
@@ -57,6 +63,13 @@ export async function POST(request: NextRequest) {
     const event = await db.event.findUnique({ where: { id: eventId } });
     if (!event) {
       return errorResponse('Event not found', 400);
+    }
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only register devices for their org's events
+    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
+      if (event.organizationId !== userOrgId) {
+        return errorResponse('You can only register devices for events in your organization', 403);
+      }
     }
 
     const device = await db.device.create({

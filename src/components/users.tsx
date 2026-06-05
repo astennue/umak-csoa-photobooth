@@ -154,16 +154,26 @@ export default function UsersPage() {
   const [formRole, setFormRole] = useState('FACILITATOR')
   const [formOrgId, setFormOrgId] = useState('')
 
-  // Fetch users
+  // Fetch users - scoped to org
   const { data: usersData, isLoading } = useQuery<UsersResponse>({
-    queryKey: ['users'],
-    queryFn: () => fetch('/api/users').then((r) => r.json()),
+    queryKey: ['users', currentRole, currentOrgId],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      return fetch(`/api/users?${params.toString()}`).then((r) => r.json())
+    },
   })
 
-  // Fetch organizations for dropdown
+  // Fetch organizations for dropdown - scoped to org
   const { data: orgsData } = useQuery<OrgsResponse>({
-    queryKey: ['org-options'],
-    queryFn: () => fetch('/api/organizations?limit=100').then((r) => r.json()),
+    queryKey: ['org-options', currentRole, currentOrgId],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      return fetch(`/api/organizations?${params.toString()}`).then((r) => r.json())
+    },
   })
 
   const orgs = orgsData?.data ?? []
@@ -183,7 +193,7 @@ export default function UsersPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, userRole: currentRole, userOrgId: currentOrgId }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to create user')
@@ -205,7 +215,7 @@ export default function UsersPage() {
       const res = await fetch(`/api/users/${data.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, userRole: currentRole, userOrgId: currentOrgId }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to update user')
@@ -224,7 +234,10 @@ export default function UsersPage() {
   // Delete user mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' })
+      const params = new URLSearchParams()
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/users/${id}?${params.toString()}`, { method: 'DELETE' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to delete user')
       return json

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { format, formatDistanceToNow } from 'date-fns'
 import {
   ScrollText,
@@ -92,6 +93,10 @@ const ACTION_CONFIG: Record<string, { label: string; badgeClass: string; icon: R
 }
 
 export default function AuditLogPage() {
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+
   // State
   const [page, setPage] = useState(1)
   const [filterOrgId, setFilterOrgId] = useState<string>('all')
@@ -101,15 +106,17 @@ export default function AuditLogPage() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [selectedLog, setSelectedLog] = useState<AuditItem | null>(null)
 
-  // Fetch audit logs
+  // Fetch audit logs - scoped to org
   const { data: auditData, isLoading } = useQuery({
-    queryKey: ['audit', page, filterOrgId, filterEventId, filterAction, filterEntityType],
+    queryKey: ['audit', page, filterOrgId, filterEventId, filterAction, filterEntityType, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' })
       if (filterOrgId && filterOrgId !== 'all') params.set('organizationId', filterOrgId)
       if (filterEventId && filterEventId !== 'all') params.set('eventId', filterEventId)
       if (filterAction && filterAction !== 'all') params.set('action', filterAction)
       if (filterEntityType && filterEntityType !== 'all') params.set('entityType', filterEntityType)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
       const res = await fetch(`/api/audit?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to fetch audit logs')
@@ -117,22 +124,28 @@ export default function AuditLogPage() {
     },
   })
 
-  // Fetch organizations for filter
+  // Fetch organizations for filter - scoped to org
   const { data: orgsData } = useQuery({
-    queryKey: ['orgs-list'],
+    queryKey: ['orgs-list', currentRole, currentOrgId],
     queryFn: async () => {
-      const res = await fetch('/api/organizations?limit=100')
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/organizations?${params.toString()}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
     },
   })
 
-  // Fetch events for filter
+  // Fetch events for filter - scoped to org
   const { data: eventsData } = useQuery({
-    queryKey: ['events-list'],
+    queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: async () => {
-      const res = await fetch('/api/events?limit=100')
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/events?${params.toString()}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
@@ -149,6 +162,9 @@ export default function AuditLogPage() {
 
   // Known action types for filter
   const actionTypes = Object.keys(ACTION_CONFIG)
+
+  // Hide org filter for non-SUPER_ADMIN (they can only see their own)
+  const isOrgScoped = currentRole === 'ORG_ADMIN' || currentRole === 'FACILITATOR'
 
   function hasActiveFilters() {
     return filterOrgId !== 'all' || filterEventId !== 'all' || filterAction !== 'all' || filterEntityType !== 'all'
@@ -199,17 +215,20 @@ export default function AuditLogPage() {
           <span className="text-sm font-medium text-muted-foreground">Filters:</span>
         </div>
 
-        <Select value={filterOrgId} onValueChange={(val) => { setFilterOrgId(val); setPage(1) }}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <SelectValue placeholder="All Orgs" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Organizations</SelectItem>
-            {orgs.map((o) => (
-              <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Only show org filter for SUPER_ADMIN */}
+        {!isOrgScoped && (
+          <Select value={filterOrgId} onValueChange={(val) => { setFilterOrgId(val); setPage(1) }}>
+            <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectValue placeholder="All Orgs" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Organizations</SelectItem>
+              {orgs.map((o) => (
+                <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <Select value={filterEventId} onValueChange={(val) => { setFilterEventId(val); setPage(1) }}>
           <SelectTrigger className="w-full sm:w-[180px]">

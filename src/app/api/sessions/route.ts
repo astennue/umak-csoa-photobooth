@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
+import { applyEventOrgFilter } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,10 +9,15 @@ export async function GET(request: NextRequest) {
     const searchParams = getSearchParams(request);
     const eventId = searchParams.get('eventId') || '';
     const status = searchParams.get('status') || '';
+    const userRole = searchParams.get('userRole') || '';
+    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (eventId) where.eventId = eventId;
     if (status) where.status = status;
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only see sessions for their org's events
+    applyEventOrgFilter(where, userRole, userOrgId);
 
     const [items, total] = await Promise.all([
       db.session.findMany({
@@ -36,7 +42,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { eventId, guestName, guestEmail, guestPhone, status, notes } = body;
+    const { eventId, guestName, guestEmail, guestPhone, status, notes, userRole, userOrgId } = body;
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
@@ -53,6 +59,13 @@ export async function POST(request: NextRequest) {
     const event = await db.event.findUnique({ where: { id: eventId } });
     if (!event) {
       return errorResponse('Event not found', 400);
+    }
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only create sessions for their org's events
+    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
+      if (event.organizationId !== userOrgId) {
+        return errorResponse('You can only create sessions for events in your organization', 403);
+      }
     }
 
     const session = await db.session.create({

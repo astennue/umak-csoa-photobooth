@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -150,6 +151,9 @@ export default function SessionsPage() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const { selectedEventId } = useAppStore()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
   // Filters
   const [eventFilter, setEventFilter] = useState<string>('all')
@@ -171,17 +175,23 @@ export default function SessionsPage() {
   const activeEventId = eventFilter === 'all' ? (selectedEventId || '') : (eventFilter === 'none' ? '' : eventFilter)
   if (activeEventId) queryParams.set('eventId', activeEventId)
   if (statusFilter !== 'all') queryParams.set('status', statusFilter)
+  if (currentRole) queryParams.set('userRole', currentRole)
+  if (currentOrgId) queryParams.set('userOrgId', currentOrgId)
 
   // Fetch sessions
   const { data: sessionsData, isLoading: sessionsLoading } = useQuery<PaginatedResponse>({
-    queryKey: ['sessions', page, activeEventId, statusFilter],
+    queryKey: ['sessions', page, activeEventId, statusFilter, currentRole, currentOrgId],
     queryFn: () => fetch(`/api/sessions?${queryParams.toString()}`).then(r => r.json()),
   })
 
-  // Fetch events for dropdowns
+  // Fetch events for dropdowns - scoped to org
+  const eventsParams = new URLSearchParams({ limit: '100' })
+  if (currentRole) eventsParams.set('userRole', currentRole)
+  if (currentOrgId) eventsParams.set('userOrgId', currentOrgId)
+
   const { data: eventsData } = useQuery<{ success: boolean; data: EventOption[] }>({
-    queryKey: ['events-list'],
-    queryFn: () => fetch('/api/events?limit=100').then(r => r.json()),
+    queryKey: ['events-list', currentRole, currentOrgId],
+    queryFn: () => fetch(`/api/events?${eventsParams.toString()}`).then(r => r.json()),
   })
 
   const events = eventsData?.data || []
@@ -194,7 +204,7 @@ export default function SessionsPage() {
       fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, userRole: currentRole, userOrgId: currentOrgId }),
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {

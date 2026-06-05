@@ -30,13 +30,19 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
+    const { userRole, ...updateData } = body;
+
+    // RBAC: Only SUPER_ADMIN can edit organizations
+    if (userRole && userRole !== 'SUPER_ADMIN') {
+      return errorResponse('Only Super Admins can edit organizations', 403);
+    }
 
     const existing = await db.organization.findUnique({ where: { id } });
     if (!existing) {
       return errorResponse('Organization not found', 404);
     }
 
-    const { name, description, logoUrl, email, phone, active } = body;
+    const { name, description, logoUrl, email, phone, active } = updateData;
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       return errorResponse('Name must be a non-empty string', 400);
     }
@@ -68,6 +74,13 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+
+    // RBAC: Check user role from query params
+    const searchParams = new URL(request.url).searchParams;
+    const userRole = searchParams.get('userRole') || '';
+    if (userRole && userRole !== 'SUPER_ADMIN') {
+      return errorResponse('Only Super Admins can delete organizations', 403);
+    }
 
     const existing = await db.organization.findUnique({ where: { id } });
     if (!existing) {

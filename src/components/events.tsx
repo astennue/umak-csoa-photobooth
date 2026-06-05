@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
 import {
   Calendar,
@@ -173,6 +174,8 @@ async function fetchEvents(params: {
   search: string
   organizationId: string
   status: string
+  userRole?: string
+  userOrgId?: string
 }): Promise<EventsResponse> {
   const sp = new URLSearchParams({
     page: String(params.page),
@@ -181,19 +184,24 @@ async function fetchEvents(params: {
   if (params.search) sp.set('search', params.search)
   if (params.organizationId) sp.set('organizationId', params.organizationId)
   if (params.status) sp.set('status', params.status)
+  if (params.userRole) sp.set('userRole', params.userRole)
+  if (params.userOrgId) sp.set('userOrgId', params.userOrgId)
   const res = await fetch(`/api/events?${sp.toString()}`)
   if (!res.ok) throw new Error('Failed to fetch events')
   return res.json()
 }
 
-async function fetchOrganizationsForFilter(): Promise<OrganizationOption[]> {
-  const res = await fetch('/api/organizations?limit=100')
+async function fetchOrganizationsForFilter(userRole?: string, userOrgId?: string): Promise<OrganizationOption[]> {
+  const params = new URLSearchParams({ limit: '100' })
+  if (userRole) params.set('userRole', userRole)
+  if (userOrgId) params.set('userOrgId', userOrgId)
+  const res = await fetch(`/api/organizations?${params.toString()}`)
   if (!res.ok) throw new Error('Failed to fetch organizations')
   const json: OrgsListResponse = await res.json()
   return json.data
 }
 
-async function createEvent(data: EventFormData): Promise<EventItem> {
+async function createEvent(data: EventFormData, userRole?: string, userOrgId?: string): Promise<EventItem> {
   const res = await fetch('/api/events', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -202,6 +210,8 @@ async function createEvent(data: EventFormData): Promise<EventItem> {
       startDate: data.startDate ? new Date(data.startDate).toISOString() : undefined,
       endDate: data.endDate ? new Date(data.endDate).toISOString() : null,
       maxSessions: data.maxSessions > 0 ? data.maxSessions : 100,
+      userRole,
+      userOrgId,
     }),
   })
   const json = await res.json()
@@ -209,8 +219,8 @@ async function createEvent(data: EventFormData): Promise<EventItem> {
   return json.data
 }
 
-async function updateEvent(id: string, data: Partial<EventFormData>): Promise<EventItem> {
-  const body: Record<string, unknown> = { ...data }
+async function updateEvent(id: string, data: Partial<EventFormData>, userRole?: string, userOrgId?: string): Promise<EventItem> {
+  const body: Record<string, unknown> = { ...data, userRole, userOrgId }
   if (data.startDate) body.startDate = new Date(data.startDate).toISOString()
   if (data.endDate) body.endDate = new Date(data.endDate).toISOString()
   else if (data.endDate === '') body.endDate = null
@@ -230,6 +240,11 @@ export default function EventsPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { setCurrentPage } = useAppStore()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+
+  const isOrgScoped = currentRole === 'ORG_ADMIN' || currentRole === 'FACILITATOR'
 
   // State
   const [page, setPage] = useState(1)
@@ -253,20 +268,28 @@ export default function EventsPage() {
 
   // Queries
   const { data, isLoading } = useQuery({
-    queryKey: ['events', page, limit, debouncedSearch, filterOrgId, filterStatus],
-    queryFn: () => fetchEvents({ page, limit, search: debouncedSearch, organizationId: filterOrgId, status: filterStatus }),
+    queryKey: ['events', page, limit, debouncedSearch, filterOrgId, filterStatus, currentRole, currentOrgId],
+    queryFn: () => fetchEvents({
+      page,
+      limit,
+      search: debouncedSearch,
+      organizationId: filterOrgId,
+      status: filterStatus,
+      userRole: currentRole,
+      userOrgId: currentOrgId,
+    }),
   })
 
   const { data: orgsData } = useQuery({
-    queryKey: ['organizations-list'],
-    queryFn: fetchOrganizationsForFilter,
+    queryKey: ['organizations-list', currentRole, currentOrgId],
+    queryFn: () => fetchOrganizationsForFilter(currentRole, currentOrgId),
   })
 
   const organizations = orgsData ?? []
 
   // Mutations
   const createMutation = useMutation({
-    mutationFn: createEvent,
+    mutationFn: (data: EventFormData) => createEvent(data, currentRole, currentOrgId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       toast({ title: 'Event created', description: 'The event has been created successfully.' })
@@ -279,7 +302,7 @@ export default function EventsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<EventFormData> }) => updateEvent(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Partial<EventFormData> }) => updateEvent(id, data, currentRole, currentOrgId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       toast({ title: 'Event updated', description: 'The event has been updated successfully.' })
@@ -293,10 +316,13 @@ export default function EventsPage() {
 
   // Handlers
   const resetForm = useCallback(() => {
-    setFormData(defaultFormData)
+    setFormData({
+      ...defaultFormData,
+      organizationId: isOrgScoped && currentOrgId ? currentOrgId : '',
+    })
     setFormErrors({})
     setSelectedEvent(null)
-  }, [])
+  }, [isOrgScoped, currentOrgId])
 
   const handleSearchChange = (value: string) => {
     setSearch(value)
@@ -377,17 +403,20 @@ export default function EventsPage() {
             className="pl-9"
           />
         </div>
-        <Select value={filterOrgId} onValueChange={(v) => { setFilterOrgId(v === '__all__' ? '' : v); setPage(1) }}>
-          <SelectTrigger className="w-full sm:w-[220px]">
-            <SelectValue placeholder="All Organizations" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All Organizations</SelectItem>
-            {organizations.map((org) => (
-              <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Only show org filter for SUPER_ADMIN */}
+        {!isOrgScoped && (
+          <Select value={filterOrgId} onValueChange={(v) => { setFilterOrgId(v === '__all__' ? '' : v); setPage(1) }}>
+            <SelectTrigger className="w-full sm:w-[220px]">
+              <SelectValue placeholder="All Organizations" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Organizations</SelectItem>
+              {organizations.map((org) => (
+                <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={filterStatus || '__all__'} onValueChange={(v) => { setFilterStatus(v === '__all__' ? '' : v); setPage(1) }}>
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue placeholder="All Statuses" />
@@ -590,19 +619,27 @@ export default function EventsPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="create-event-org">Organization *</Label>
-              <Select
-                value={formData.organizationId}
-                onValueChange={(v) => setFormData((f) => ({ ...f, organizationId: v }))}
-              >
-                <SelectTrigger id="create-event-org" className="w-full">
-                  <SelectValue placeholder="Select organization" />
-                </SelectTrigger>
-                <SelectContent>
-                  {organizations.map((org) => (
-                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {isOrgScoped && currentOrgId ? (
+                <Input
+                  value={organizations.find((o) => o.id === currentOrgId)?.name || 'Your Organization'}
+                  disabled
+                  className="bg-muted"
+                />
+              ) : (
+                <Select
+                  value={formData.organizationId}
+                  onValueChange={(v) => setFormData((f) => ({ ...f, organizationId: v }))}
+                >
+                  <SelectTrigger id="create-event-org" className="w-full">
+                    <SelectValue placeholder="Select organization" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               {formErrors.organizationId && <p className="text-xs text-destructive">{formErrors.organizationId}</p>}
             </div>
             <div className="grid gap-2">
@@ -771,19 +808,27 @@ export default function EventsPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-event-org">Organization</Label>
-              <Select
-                value={formData.organizationId}
-                onValueChange={(v) => setFormData((f) => ({ ...f, organizationId: v }))}
-              >
-                <SelectTrigger id="edit-event-org" className="w-full">
-                  <SelectValue placeholder="Select organization" />
-                </SelectTrigger>
-                <SelectContent>
-                  {organizations.map((org) => (
-                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {isOrgScoped && currentOrgId ? (
+                <Input
+                  value={organizations.find((o) => o.id === currentOrgId)?.name || 'Your Organization'}
+                  disabled
+                  className="bg-muted"
+                />
+              ) : (
+                <Select
+                  value={formData.organizationId}
+                  onValueChange={(v) => setFormData((f) => ({ ...f, organizationId: v }))}
+                >
+                  <SelectTrigger id="edit-event-org" className="w-full">
+                    <SelectValue placeholder="Select organization" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               {formErrors.organizationId && <p className="text-xs text-destructive">{formErrors.organizationId}</p>}
             </div>
             <div className="grid gap-2">

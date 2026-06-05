@@ -7,10 +7,19 @@ export async function GET(request: NextRequest) {
     const searchParams = new URL(request.url).searchParams;
     const organizationId = searchParams.get('organizationId') || '';
     const eventId = searchParams.get('eventId') || '';
+    const userRole = searchParams.get('userRole') || '';
+    const userOrgId = searchParams.get('userOrgId') || '';
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only see analytics for their own org
+    const effectiveOrgId = (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') ? userOrgId : organizationId;
 
     const eventWhere: any = {};
-    if (organizationId) eventWhere.organizationId = organizationId;
+    if (effectiveOrgId) eventWhere.organizationId = effectiveOrgId;
     if (eventId) eventWhere.id = eventId;
+
+    // Session and queue filters that respect org scope
+    const sessionEventWhere: any = {};
+    if (effectiveOrgId) sessionEventWhere.organizationId = effectiveOrgId;
 
     const [
       totalOrganizations,
@@ -23,33 +32,54 @@ export async function GET(request: NextRequest) {
       totalGallery,
       totalDevices,
     ] = await Promise.all([
-      db.organization.count(),
+      // SUPER_ADMIN sees all orgs, others only see their own
+      (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR')
+        ? db.organization.count({ where: { id: effectiveOrgId } })
+        : db.organization.count(),
       db.event.count({ where: eventWhere }),
       db.session.count({
-        where: eventId ? { eventId } : {},
+        where: effectiveOrgId
+          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
+          : eventId ? { eventId } : {},
       }),
       db.queueEntry.count({
-        where: eventId ? { eventId } : {},
+        where: effectiveOrgId
+          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
+          : eventId ? { eventId } : {},
       }),
       db.event.count({ where: { ...eventWhere, status: 'ACTIVE' } }),
       db.session.count({
-        where: { status: 'COMPLETED', ...(eventId ? { eventId } : {}) },
+        where: {
+          status: 'COMPLETED',
+          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
+          ...(eventId ? { eventId } : {}),
+        },
       }),
       db.queueEntry.count({
-        where: { status: 'WAITING', ...(eventId ? { eventId } : {}) },
+        where: {
+          status: 'WAITING',
+          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
+          ...(eventId ? { eventId } : {}),
+        },
       }),
       db.gallery.count({
-        where: eventId ? { eventId } : {},
+        where: effectiveOrgId
+          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
+          : eventId ? { eventId } : {},
       }),
       db.device.count({
-        where: eventId ? { eventId } : {},
+        where: effectiveOrgId
+          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
+          : eventId ? { eventId } : {},
       }),
     ]);
 
     const recentSessions = await db.session.findMany({
       take: 5,
       orderBy: { createdAt: 'desc' },
-      where: eventId ? { eventId } : {},
+      where: effectiveOrgId
+        ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
+        : eventId ? { eventId } : {},
       include: { event: { select: { id: true, name: true } } },
     });
 

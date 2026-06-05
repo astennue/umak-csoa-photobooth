@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { useToast } from '@/hooks/use-toast'
 import { formatDistanceToNow, format } from 'date-fns'
 import {
@@ -108,6 +109,9 @@ const TYPE_CONFIG: Record<DeviceType, { label: string; badgeClass: string; icon:
 export default function DevicesPage() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as any)?.role as string | undefined
+  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
   // State
   const [page, setPage] = useState(1)
@@ -124,14 +128,16 @@ export default function DevicesPage() {
   const [formIpAddress, setFormIpAddress] = useState('')
   const [formFirmware, setFormFirmware] = useState('')
 
-  // Fetch devices
+  // Fetch devices - scoped to org
   const { data: devicesData, isLoading } = useQuery({
-    queryKey: ['devices', page, filterEventId, filterStatus, filterType],
+    queryKey: ['devices', page, filterEventId, filterStatus, filterType, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '10' })
       if (filterEventId && filterEventId !== 'all') params.set('eventId', filterEventId)
       if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus)
       if (filterType && filterType !== 'all') params.set('type', filterType)
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
       const res = await fetch(`/api/devices?${params}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to fetch devices')
@@ -139,11 +145,14 @@ export default function DevicesPage() {
     },
   })
 
-  // Fetch events
+  // Fetch events - scoped to org
   const { data: eventsData } = useQuery({
-    queryKey: ['events-list'],
+    queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: async () => {
-      const res = await fetch('/api/events?limit=100')
+      const params = new URLSearchParams({ limit: '100' })
+      if (currentRole) params.set('userRole', currentRole)
+      if (currentOrgId) params.set('userOrgId', currentOrgId)
+      const res = await fetch(`/api/events?${params.toString()}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       return json
@@ -167,7 +176,7 @@ export default function DevicesPage() {
       const res = await fetch('/api/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, userRole: currentRole, userOrgId: currentOrgId }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed to register device')
