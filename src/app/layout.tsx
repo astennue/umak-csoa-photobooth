@@ -15,22 +15,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CSOA Photobooth Management System",
-  description: "Comprehensive dashboard for managing photo booth events, organizations, sessions, queues, galleries, templates, and devices.",
-  keywords: ["CSOA", "Photobooth", "Management", "Events", "Dashboard"],
-  authors: [{ name: "CSOA Team" }],
+  title: "UMak CSOA Photobooth Management System",
+  description: "Photobooth management system for the Center for Student Organization and Activities at the University of Makati",
+  keywords: ["UMak", "CSOA", "Photobooth", "Management", "Events", "University of Makati"],
+  authors: [{ name: "UMak CSOA" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/umak-csoa-logo.png",
   },
   openGraph: {
-    title: "CSOA Photobooth Management System",
-    description: "Comprehensive dashboard for managing photo booth events, organizations, sessions, queues, galleries, templates, and devices.",
+    title: "UMak CSOA Photobooth Management System",
+    description: "Photobooth management system for the Center for Student Organization and Activities at the University of Makati",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CSOA Photobooth Management System",
-    description: "Comprehensive dashboard for managing photo booth events, organizations, sessions, queues, galleries, templates, and devices.",
+    title: "UMak CSOA Photobooth Management System",
+    description: "Photobooth management system for the Center for Student Organization and Activities at the University of Makati",
   },
 };
 

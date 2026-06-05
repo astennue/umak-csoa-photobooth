@@ -70,3 +70,14 @@ upload/
 
 # Skills directory
 /skills/
+# Database
+dev.db
+dev.db-journal
+*.db
+*.db-journal
+
+# Uploads
+upload/
+
+# Scripts
+scripts/
