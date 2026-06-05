@@ -317,6 +317,8 @@ export default function Home() {
               src="/umak-csoa-logo.png"
               alt="UMak CSOA"
               fill
+              sizes="64px"
+              loading="eager"
               className="object-contain p-1"
             />
           </div>

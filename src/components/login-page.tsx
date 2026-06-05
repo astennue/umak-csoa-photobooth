@@ -62,6 +62,7 @@ export default function LoginPage() {
                   src="/umak-csoa-logo.png"
                   alt="UMak CSOA Logo"
                   fill
+                  sizes="96px"
                   className="object-contain p-1"
                   priority
                 />
