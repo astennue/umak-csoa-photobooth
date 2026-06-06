@@ -123,12 +123,12 @@ const BOARD_COLUMNS = [
 
 function QueueStatusBadge({ status }: { status: string }) {
   const colorClasses: Record<string, string> = {
-    WAITING: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400',
-    NOTIFIED: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-400',
-    ACTIVE: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400',
-    COMPLETED: 'bg-slate-100 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300',
-    SKIPPED: 'bg-orange-100 text-orange-700 hover:bg-orange-100 dark:bg-orange-900/30 dark:text-orange-400',
-    CANCELLED: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400',
+    WAITING: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-300 dark:border-amber-700',
+    NOTIFIED: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-400 border border-cyan-300 dark:border-cyan-700',
+    ACTIVE: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700',
+    COMPLETED: 'bg-slate-100 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-600',
+    SKIPPED: 'bg-orange-100 text-orange-700 hover:bg-orange-100 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-300 dark:border-orange-700',
+    CANCELLED: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 border border-red-300 dark:border-red-700',
   }
 
   return (
@@ -433,14 +433,14 @@ export default function QueuePage() {
           <h1 className="text-3xl font-bold tracking-tight">Queue</h1>
           <p className="text-muted-foreground">Manage the photo session queue for your events.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }}>
+        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4 mr-2" />
           Add to Queue
         </Button>
       </div>
 
       {/* Filters & View Toggle */}
-      <Card>
+      <Card className="border-l-4 border-l-emerald-500">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-4 items-end">
             <div className="flex-1 min-w-0">
@@ -494,9 +494,11 @@ export default function QueuePage() {
                       ))}
                     </div>
                   ) : colEntries.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <ListOrdered className="size-8 mb-2 opacity-30" />
-                      <p className="text-sm">No entries</p>
+                    <div className="flex flex-col items-center justify-center py-8">
+                      <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-2">
+                        <ListOrdered className="size-5 text-emerald-600 dark:text-emerald-400" />
+                      </div>
+                      <p className="text-sm text-muted-foreground">No entries</p>
                     </div>
                   ) : (
                     <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-0 scrollbar-thin">
@@ -539,8 +541,10 @@ export default function QueuePage() {
               </div>
             ) : entries.length === 0 ? (
               <div className="p-6 text-center text-muted-foreground">
-                <ListOrdered className="size-10 mx-auto mb-2 opacity-40" />
-                <p>No queue entries found.</p>
+                <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-2 mx-auto">
+                  <ListOrdered className="size-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <p className="text-muted-foreground">No queue entries found.</p>
                 <p className="text-sm">Add someone to the queue to get started.</p>
               </div>
             ) : (
@@ -563,7 +567,7 @@ export default function QueuePage() {
                       const transitions = STATUS_TRANSITIONS[entry.status] || []
                       const isTerminal = transitions.length === 0
                       return (
-                        <TableRow key={entry.id}>
+                        <TableRow key={entry.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
                           <TableCell className="font-mono text-muted-foreground">
                             {entry.position}
                           </TableCell>
@@ -710,7 +714,7 @@ export default function QueuePage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={submitting || !form.eventId || !form.name.trim()}>
+            <Button onClick={handleCreate} disabled={submitting || !form.eventId || !form.name.trim()} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {submitting ? 'Adding...' : 'Add to Queue'}
             </Button>
           </DialogFooter>

@@ -271,8 +271,8 @@ export default function OrganizationsPage() {
           <p className="text-muted-foreground">View your organization details.</p>
         </div>
 
-        <Card>
-          <CardHeader>
+        <Card className="border-l-4 border-l-emerald-500">
+          <CardHeader className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30">
             <div className="flex items-center gap-3">
               <div className="flex size-12 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
                 <Building2 className="size-6 text-emerald-600 dark:text-emerald-400" />
@@ -329,7 +329,7 @@ export default function OrganizationsPage() {
           <p className="text-muted-foreground">Manage your photobooth organizations and their settings.</p>
         </div>
         {canManageOrgs && (
-          <Button onClick={() => { resetForm(); setCreateOpen(true) }}>
+          <Button onClick={() => { resetForm(); setCreateOpen(true) }} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
             <Plus className="size-4 mr-2" />
             Add Organization
           </Button>
@@ -343,7 +343,7 @@ export default function OrganizationsPage() {
           placeholder="Search by name, description, or email..."
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
-          className="pl-9"
+          className="pl-9 focus-visible:ring-emerald-500"
         />
       </div>
 
@@ -374,17 +374,20 @@ export default function OrganizationsPage() {
               ))
             ) : organizations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canManageOrgs ? 6 : 5} className="h-24 text-center text-muted-foreground">
-                  {debouncedSearch ? 'No organizations found matching your search.' : 'No organizations yet. Create one to get started!'}
+                <TableCell colSpan={canManageOrgs ? 6 : 5} className="h-24 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Building2 className="size-8 text-emerald-400/60" />
+                    <span className="text-muted-foreground">{debouncedSearch ? 'No organizations found matching your search.' : 'No organizations yet. Create one to get started!'}</span>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
               organizations.map((org) => (
-                <TableRow key={org.id}>
+                <TableRow key={org.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                        <Building2 className="size-4 text-muted-foreground" />
+                      <div className="flex size-8 items-center justify-center rounded-md bg-emerald-100 dark:bg-emerald-900/30">
+                        <Building2 className="size-4 text-emerald-600 dark:text-emerald-400" />
                       </div>
                       <div>
                         <div className="font-medium">{org.name}</div>
@@ -551,7 +554,7 @@ export default function OrganizationsPage() {
               <Button variant="outline" onClick={() => { setCreateOpen(false); resetForm() }}>
                 Cancel
               </Button>
-              <Button onClick={handleCreate} disabled={createMutation.isPending}>
+              <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
                 {createMutation.isPending ? 'Creating...' : 'Create'}
               </Button>
             </DialogFooter>
@@ -626,7 +629,7 @@ export default function OrganizationsPage() {
               <Button variant="outline" onClick={() => { setEditOpen(false); resetForm() }}>
                 Cancel
               </Button>
-              <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
+              <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
                 {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>

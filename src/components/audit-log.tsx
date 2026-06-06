@@ -72,7 +72,7 @@ interface EventOption {
 const ACTION_CONFIG: Record<string, { label: string; badgeClass: string; icon: React.ComponentType<{ className?: string }> }> = {
   CREATE: {
     label: 'Create',
-    badgeClass: 'bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20',
+    badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20',
     icon: Plus,
   },
   UPDATE: {
@@ -294,7 +294,7 @@ export default function AuditLogPage() {
       ) : logs.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <ScrollText className="size-12 text-muted-foreground/50 mb-4" />
+            <ScrollText className="size-12 text-emerald-400/60 mb-4" />
             <h3 className="text-lg font-medium">No audit logs found</h3>
             <p className="text-sm text-muted-foreground mt-1">
               Adjust your filters to see audit log entries.
@@ -326,7 +326,7 @@ export default function AuditLogPage() {
                     return (
                       <TableRow
                         key={log.id}
-                        className="cursor-pointer hover:bg-muted/50"
+                        className="cursor-pointer hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20"
                         onClick={() => openDetail(log)}
                       >
                         <TableCell className="text-sm">
@@ -386,7 +386,7 @@ export default function AuditLogPage() {
                 return (
                   <div
                     key={log.id}
-                    className="p-4 hover:bg-muted/50 cursor-pointer"
+                    className="p-4 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 cursor-pointer"
                     onClick={() => openDetail(log)}
                   >
                     <div className="flex items-center justify-between mb-2">

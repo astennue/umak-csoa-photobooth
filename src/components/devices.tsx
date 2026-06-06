@@ -236,7 +236,7 @@ export default function DevicesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
           <p className="text-muted-foreground">Monitor and manage photobooth devices.</p>
         </div>
-        <Button onClick={() => setRegisterOpen(true)} className="gap-2">
+        <Button onClick={() => setRegisterOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4" />
           Register Device
         </Button>
@@ -309,7 +309,7 @@ export default function DevicesPage() {
       ) : devices.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Monitor className="size-12 text-muted-foreground/50 mb-4" />
+            <Monitor className="size-12 text-emerald-400/60 mb-4" />
             <h3 className="text-lg font-medium">No devices found</h3>
             <p className="text-sm text-muted-foreground mt-1">
               Register a device or adjust your filters to see results.
@@ -325,7 +325,7 @@ export default function DevicesPage() {
             const TypeIcon = typeConfig.icon
 
             return (
-              <Card key={device.id} className="hover:shadow-md transition-shadow">
+              <Card key={device.id} className="hover:shadow-md transition-shadow border-l-4 border-l-emerald-500">
                 <CardContent className="p-4 space-y-3">
                   {/* Device name and status */}
                   <div className="flex items-start justify-between">
@@ -498,7 +498,7 @@ export default function DevicesPage() {
             <Button variant="outline" onClick={() => { resetForm(); setRegisterOpen(false) }}>
               Cancel
             </Button>
-            <Button onClick={handleRegister} disabled={registerMutation.isPending}>
+            <Button onClick={handleRegister} disabled={registerMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {registerMutation.isPending ? 'Registering...' : 'Register'}
             </Button>
           </DialogFooter>

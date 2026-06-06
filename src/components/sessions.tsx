@@ -114,10 +114,10 @@ function StatusBadge({ status }: { status: string }) {
   }
 
   const colorClasses: Record<string, string> = {
-    SCHEDULED: 'bg-slate-100 text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300',
-    IN_PROGRESS: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400',
-    COMPLETED: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400',
-    CANCELLED: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400',
+    SCHEDULED: 'bg-slate-100 text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-600',
+    IN_PROGRESS: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-300 dark:border-amber-700',
+    COMPLETED: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700',
+    CANCELLED: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 border border-red-300 dark:border-red-700',
   }
 
   return (
@@ -333,14 +333,14 @@ export default function SessionsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
           <p className="text-muted-foreground">Track and manage photobooth sessions.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }}>
+        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4 mr-2" />
           Add Session
         </Button>
       </div>
 
       {/* Filters */}
-      <Card>
+      <Card className="border-l-4 border-l-emerald-500">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 min-w-0">
@@ -397,10 +397,12 @@ export default function SessionsPage() {
               ))}
             </div>
           ) : sessions.length === 0 ? (
-            <div className="p-6 text-center text-muted-foreground">
-              <Users className="size-10 mx-auto mb-2 opacity-40" />
-              <p>No sessions found.</p>
-              <p className="text-sm">Create a new session to get started.</p>
+            <div className="p-6 text-center">
+              <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mx-auto mb-2">
+                <Users className="size-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <p className="text-muted-foreground">No sessions found.</p>
+              <p className="text-sm text-muted-foreground">Create a new session to get started.</p>
             </div>
           ) : (
             <>
@@ -420,7 +422,7 @@ export default function SessionsPage() {
                   </TableHeader>
                   <TableBody>
                     {sessions.map((session) => (
-                      <TableRow key={session.id}>
+                      <TableRow key={session.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
                         <TableCell className="font-medium">{session.guestName}</TableCell>
                         <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
                           {session.guestEmail || '—'}
@@ -581,7 +583,7 @@ export default function SessionsPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={submitting || !form.eventId || !form.guestName.trim()}>
+            <Button onClick={handleCreate} disabled={submitting || !form.eventId || !form.guestName.trim()} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {submitting ? 'Creating...' : 'Create Session'}
             </Button>
           </DialogFooter>
@@ -657,7 +659,7 @@ export default function SessionsPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleEdit} disabled={submitting || !form.guestName.trim()}>
+            <Button onClick={handleEdit} disabled={submitting || !form.guestName.trim()} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {submitting ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>

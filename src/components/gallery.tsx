@@ -253,7 +253,7 @@ export default function GalleryPage() {
           <h1 className="text-3xl font-bold tracking-tight">Photo Gallery</h1>
           <p className="text-muted-foreground">Browse and manage photos from all events and sessions.</p>
         </div>
-        <Button onClick={() => setUploadOpen(true)} className="gap-2">
+        <Button onClick={() => setUploadOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Upload className="size-4" />
           Upload Photo
         </Button>
@@ -318,7 +318,7 @@ export default function GalleryPage() {
       ) : photos.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <ImageIcon className="size-12 text-muted-foreground/50 mb-4" />
+            <ImageIcon className="size-12 text-emerald-400/60 mb-4" />
             <h3 className="text-lg font-medium">No photos found</h3>
             <p className="text-sm text-muted-foreground mt-1">
               Upload a photo or adjust your filters to see results.
@@ -498,7 +498,7 @@ export default function GalleryPage() {
             <Button variant="outline" onClick={() => { resetForm(); setUploadOpen(false) }}>
               Cancel
             </Button>
-            <Button onClick={handleUpload} disabled={uploadMutation.isPending}>
+            <Button onClick={handleUpload} disabled={uploadMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
             </Button>
           </DialogFooter>

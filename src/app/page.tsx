@@ -131,6 +131,7 @@ function SidebarThemeToggle() {
     <SidebarMenuButton
       tooltip="Toggle Theme"
       onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+      className="text-white/60 hover:bg-white/10 hover:text-white data-[active=true]:bg-white/10 data-[active=true]:text-white [&>svg]:text-emerald-300/70"
     >
       <Sun className="size-4 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
       <Moon className="absolute size-4 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
@@ -155,8 +156,8 @@ function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="flex items-center gap-2 px-2 h-9">
-          <Avatar className="size-7">
-            <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+          <Avatar className="size-7 ring-2 ring-emerald-500/30">
+            <AvatarFallback className="text-xs bg-gradient-to-br from-emerald-500 to-emerald-700 text-white font-semibold">
               {initials}
             </AvatarFallback>
           </Avatar>
@@ -200,12 +201,25 @@ function AppSidebar() {
   const navItems = getNavItems(role)
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar
+      collapsible="icon"
+      className="bg-gradient-to-b from-emerald-700 via-emerald-800 to-emerald-950 dark:from-emerald-900 dark:via-emerald-950 dark:to-black border-r-0"
+      style={{
+        '--sidebar': 'transparent',
+        '--sidebar-foreground': 'rgba(255,255,255,0.92)',
+        '--sidebar-accent': 'rgba(255,255,255,0.08)',
+        '--sidebar-accent-foreground': 'white',
+        '--sidebar-border': 'rgba(255,255,255,0.08)',
+        '--sidebar-primary': 'white',
+        '--sidebar-primary-foreground': '#065f46',
+        '--sidebar-ring': 'rgba(52,211,153,0.5)',
+      } as React.CSSProperties}
+    >
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip="UMak CSOA">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden bg-white">
+            <SidebarMenuButton size="lg" tooltip="UMak CSOA" className="hover:bg-white/10">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden bg-white ring-2 ring-emerald-400/50 shadow-md shadow-emerald-900/30">
                 <Image
                   src="/umak-csoa-logo.png"
                   alt="UMak CSOA"
@@ -215,8 +229,8 @@ function AppSidebar() {
                 />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">UMak CSOA</span>
-                <span className="truncate text-xs">Photobooth Manager</span>
+                <span className="truncate font-bold text-white">UMak CSOA</span>
+                <span className="truncate text-xs text-emerald-200/70">Photobooth Manager</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -224,26 +238,36 @@ function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-emerald-300/50 uppercase tracking-wider text-[10px] font-semibold">
+            Navigation
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.page}>
-                  <SidebarMenuButton
-                    isActive={currentPage === item.page}
-                    onClick={() => setCurrentPage(item.page)}
-                    tooltip={item.label}
-                  >
-                    <item.icon className="size-4" />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navItems.map((item) => {
+                const isActive = currentPage === item.page
+                return (
+                  <SidebarMenuItem key={item.page}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => setCurrentPage(item.page)}
+                      tooltip={item.label}
+                      className={
+                        isActive
+                          ? 'data-[active=true]:bg-emerald-400/20 data-[active=true]:text-white data-[active=true]:font-semibold [&>svg]:text-emerald-300 hover:bg-emerald-400/25 hover:text-white'
+                          : 'text-white/65 hover:bg-white/10 hover:text-white [&>svg]:text-white/45 hover:[&>svg]:text-white/80'
+                      }
+                    >
+                      <item.icon className="size-4" />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-white/5">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarThemeToggle />
@@ -278,11 +302,11 @@ function PageContent() {
 
   return (
     <SidebarInset>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-emerald-100/50 bg-white/80 dark:border-emerald-900/30 dark:bg-gray-950/80 backdrop-blur-md px-4">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
         <div className="flex-1">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-sm font-semibold text-foreground/80">
             {navItems.find((item) => item.page === currentPage)?.label ?? currentPage}
           </h2>
         </div>
@@ -295,9 +319,10 @@ function PageContent() {
         <div className="flex-1 p-4 md:p-6">
           <CurrentPageComponent />
         </div>
-        <footer className="border-t py-4 px-4 md:px-6">
+        <footer className="border-t border-emerald-100/30 dark:border-emerald-900/20 py-4 px-4 md:px-6">
           <p className="text-xs text-muted-foreground text-center">
-            © 2026 UMak CSOA - Center for Student Organization and Activities. University of Makati.
+            <span className="text-emerald-600 dark:text-emerald-400">&copy;</span>{' '}
+            2025 UMak CSOA &mdash; Center for Student Organization and Activities. University of Makati.
           </p>
         </footer>
       </div>
@@ -310,22 +335,57 @@ export default function Home() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-900 via-teal-800 to-emerald-950">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-white shadow-lg p-1">
-            <Image
-              src="/umak-csoa-logo.png"
-              alt="UMak CSOA"
-              fill
-              sizes="64px"
-              loading="eager"
-              className="object-contain p-1"
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-950 relative overflow-hidden">
+        {/* Decorative background elements */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-1/4 -left-1/4 w-1/2 h-1/2 rounded-full bg-emerald-600/10 blur-3xl" />
+          <div className="absolute -bottom-1/4 -right-1/4 w-1/2 h-1/2 rounded-full bg-teal-600/10 blur-3xl" />
+        </div>
+
+        <div className="flex flex-col items-center gap-6 relative z-10">
+          {/* Logo with animated ring */}
+          <div className="relative">
+            <div className="absolute -inset-2 rounded-2xl bg-emerald-400/20 animate-pulse" />
+            <div className="absolute -inset-1 rounded-xl bg-emerald-400/10 animate-ping" style={{ animationDuration: '2s' }} />
+            <div className="relative w-20 h-20 rounded-xl overflow-hidden bg-white shadow-xl shadow-emerald-950/50 p-2 ring-2 ring-emerald-400/40">
+              <Image
+                src="/umak-csoa-logo.png"
+                alt="UMak CSOA"
+                fill
+                sizes="80px"
+                loading="eager"
+                className="object-contain p-1"
+              />
+            </div>
+          </div>
+
+          {/* App name */}
+          <div className="text-center space-y-1">
+            <h1 className="text-xl font-bold text-white tracking-tight">
+              UMak CSOA
+            </h1>
+            <p className="text-sm text-emerald-300/70 font-medium">
+              Photobooth Manager
+            </p>
+          </div>
+
+          {/* Animated loading dots */}
+          <div className="flex items-center gap-2">
+            <div
+              className="size-2 rounded-full bg-emerald-400 animate-bounce"
+              style={{ animationDelay: '0ms', animationDuration: '800ms' }}
+            />
+            <div
+              className="size-2 rounded-full bg-emerald-400/80 animate-bounce"
+              style={{ animationDelay: '150ms', animationDuration: '800ms' }}
+            />
+            <div
+              className="size-2 rounded-full bg-emerald-400/60 animate-bounce"
+              style={{ animationDelay: '300ms', animationDuration: '800ms' }}
             />
           </div>
-          <div className="flex items-center gap-2 text-white/80">
-            <div className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-sm">Loading...</span>
-          </div>
+
+          <span className="text-sm text-white/40 tracking-wide">Loading...</span>
         </div>
       </div>
     )
@@ -336,7 +396,18 @@ export default function Home() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      style={{
+        '--sidebar': 'transparent',
+        '--sidebar-foreground': 'rgba(255,255,255,0.92)',
+        '--sidebar-accent': 'rgba(255,255,255,0.08)',
+        '--sidebar-accent-foreground': 'white',
+        '--sidebar-border': 'rgba(255,255,255,0.08)',
+        '--sidebar-primary': 'white',
+        '--sidebar-primary-foreground': '#065f46',
+        '--sidebar-ring': 'rgba(52,211,153,0.5)',
+      } as React.CSSProperties}
+    >
       <AppSidebar />
       <PageContent />
     </SidebarProvider>

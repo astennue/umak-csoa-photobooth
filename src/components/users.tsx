@@ -343,7 +343,7 @@ export default function UsersPage() {
           </p>
         </div>
         {(currentRole === 'SUPER_ADMIN' || currentRole === 'ORG_ADMIN') && (
-          <Button onClick={openCreateDialog} className="bg-emerald-700 hover:bg-emerald-800 text-white">
+          <Button onClick={openCreateDialog} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
             <Plus className="size-4 mr-2" />
             Add User
           </Button>
@@ -357,12 +357,12 @@ export default function UsersPage() {
           placeholder="Search users..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
+          className="pl-9 focus-visible:ring-emerald-500"
         />
       </div>
 
       {/* Users Table */}
-      <Card>
+      <Card className="border-l-4 border-l-emerald-500">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="size-5" />
@@ -391,13 +391,16 @@ export default function UsersPage() {
                 <TableBody>
                   {filteredUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                        No users found.
+                      <TableCell colSpan={6} className="h-24 text-center">
+                        <div className="flex flex-col items-center gap-2">
+                          <Users className="size-8 text-emerald-400/60" />
+                          <span className="text-muted-foreground">No users found.</span>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredUsers.map((user) => (
-                      <TableRow key={user.id}>
+                      <TableRow key={user.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                         <TableCell>{getRoleBadge(user.role)}</TableCell>
@@ -541,7 +544,7 @@ export default function UsersPage() {
             <Button
               onClick={handleCreate}
               disabled={createMutation.isPending}
-              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
             >
               {createMutation.isPending ? 'Creating...' : 'Create User'}
             </Button>
@@ -628,7 +631,7 @@ export default function UsersPage() {
             <Button
               onClick={handleUpdate}
               disabled={updateMutation.isPending}
-              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
             >
               {updateMutation.isPending ? 'Updating...' : 'Update User'}
             </Button>

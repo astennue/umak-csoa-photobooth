@@ -247,7 +247,7 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
           <p className="text-muted-foreground">Design and manage photo templates for your events.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2">
+        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4" />
           Create Template
         </Button>
@@ -303,7 +303,7 @@ export default function TemplatesPage() {
       ) : templates.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Palette className="size-12 text-muted-foreground/50 mb-4" />
+            <Palette className="size-12 text-emerald-400/60 mb-4" />
             <h3 className="text-lg font-medium">No templates found</h3>
             <p className="text-sm text-muted-foreground mt-1">
               Create a template or adjust your filters to see results.
@@ -313,7 +313,7 @@ export default function TemplatesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (
-            <Card key={template.id} className="hover:shadow-md transition-shadow">
+            <Card key={template.id} className="hover:shadow-md transition-shadow border-l-4 border-l-emerald-500">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="space-y-1 min-w-0 flex-1">
@@ -324,7 +324,7 @@ export default function TemplatesPage() {
                     variant={template.active ? 'default' : 'secondary'}
                     className={`ml-2 shrink-0 gap-1 ${
                       template.active
-                        ? 'bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20'
                         : 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/20'
                     }`}
                   >
@@ -481,7 +481,7 @@ export default function TemplatesPage() {
             <Button variant="outline" onClick={() => { setForm(emptyForm); setCreateOpen(false) }}>
               Cancel
             </Button>
-            <Button onClick={() => handleSubmit(false)} disabled={createMutation.isPending}>
+            <Button onClick={() => handleSubmit(false)} disabled={createMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {createMutation.isPending ? 'Creating...' : 'Create'}
             </Button>
           </DialogFooter>
@@ -563,7 +563,7 @@ export default function TemplatesPage() {
             <Button variant="outline" onClick={() => { setForm(emptyForm); setEditOpen(false); setEditingTemplate(null) }}>
               Cancel
             </Button>
-            <Button onClick={() => handleSubmit(true)} disabled={updateMutation.isPending}>
+            <Button onClick={() => handleSubmit(true)} disabled={updateMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>

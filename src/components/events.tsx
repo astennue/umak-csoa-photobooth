@@ -386,7 +386,7 @@ export default function EventsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Events</h1>
           <p className="text-muted-foreground">Manage photobooth events across your organizations.</p>
         </div>
-        <Button onClick={() => { resetForm(); setCreateOpen(true) }}>
+        <Button onClick={() => { resetForm(); setCreateOpen(true) }} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4 mr-2" />
           Add Event
         </Button>
@@ -400,7 +400,7 @@ export default function EventsPage() {
             placeholder="Search events..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
-            className="pl-9"
+            className="pl-9 focus-visible:ring-emerald-500"
           />
         </div>
         {/* Only show org filter for SUPER_ADMIN */}
@@ -454,7 +454,9 @@ export default function EventsPage() {
         </div>
       ) : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Calendar className="size-12 text-muted-foreground/50 mb-4" />
+          <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-4">
+            <Calendar className="size-7 text-emerald-600 dark:text-emerald-400" />
+          </div>
           <h3 className="text-lg font-medium">No events found</h3>
           <p className="text-sm text-muted-foreground mt-1">
             {debouncedSearch || filterOrgId || filterStatus
@@ -465,7 +467,7 @@ export default function EventsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {events.map((event) => (
-            <Card key={event.id} className="overflow-hidden flex flex-col">
+            <Card key={event.id} className="overflow-hidden flex flex-col border-l-4 border-l-emerald-500 hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="space-y-1 min-w-0">
@@ -525,9 +527,8 @@ export default function EventsPage() {
                 {/* Actions */}
                 <div className="flex gap-2 pt-2">
                   <Button
-                    variant="outline"
                     size="sm"
-                    className="flex-1"
+                    className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
                     onClick={() => handleEdit(event)}
                   >
                     <Pencil className="size-3.5 mr-1.5" />
@@ -536,7 +537,7 @@ export default function EventsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex-1"
+                    className="flex-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950"
                     onClick={() => {
                       setCurrentPage('sessions')
                     }}
@@ -751,7 +752,7 @@ export default function EventsPage() {
             <Button variant="outline" onClick={() => { setCreateOpen(false); resetForm() }}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
+            <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {createMutation.isPending ? 'Creating...' : 'Create Event'}
             </Button>
           </DialogFooter>
@@ -947,7 +948,7 @@ export default function EventsPage() {
             <Button variant="outline" onClick={() => { setEditOpen(false); resetForm() }}>
               Cancel
             </Button>
-            <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
+            <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
               {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>

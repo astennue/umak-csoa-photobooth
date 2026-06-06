@@ -70,44 +70,44 @@ function getStatusBadge(status: string) {
     SCHEDULED: {
       label: 'Scheduled',
       className:
-        'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
+        'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-700',
     },
     IN_PROGRESS: {
       label: 'In Progress',
       className:
-        'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800',
+        'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700',
     },
     COMPLETED: {
       label: 'Completed',
       className:
-        'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
+        'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700',
     },
     CANCELLED: {
       label: 'Cancelled',
       className:
-        'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800',
+        'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/40 dark:text-red-300 dark:border-red-700',
     },
     ACTIVE: {
       label: 'Active',
       className:
-        'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
+        'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700',
     },
     DRAFT: {
       label: 'Draft',
       className:
-        'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
+        'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
     },
     WAITING: {
       label: 'Waiting',
       className:
-        'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800',
+        'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700',
     },
   }
 
   const c = config[status] ?? {
     label: status,
     className:
-      'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
+      'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
   }
 
   return (
@@ -164,8 +164,7 @@ interface PrimaryStatCardProps {
   value: number
   description: string
   icon: React.ComponentType<{ className?: string }>
-  iconBg: string
-  iconColor: string
+  gradient: string
 }
 
 function PrimaryStatCard({
@@ -173,25 +172,19 @@ function PrimaryStatCard({
   value,
   description,
   icon: Icon,
-  iconBg,
-  iconColor,
+  gradient,
 }: PrimaryStatCardProps) {
   return (
-    <Card className="relative overflow-hidden">
-      <div
-        className={`absolute inset-0 ${iconBg} opacity-40 dark:opacity-20 pointer-events-none`}
-      />
-      <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        <div
-          className={`flex size-9 items-center justify-center rounded-lg ${iconBg}`}
-        >
-          <Icon className={`size-5 ${iconColor}`} />
+    <Card className={`bg-gradient-to-br ${gradient} text-white border-0 shadow-lg`}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium text-white/80">{title}</CardTitle>
+        <div className="flex size-9 items-center justify-center rounded-lg bg-white/20">
+          <Icon className="size-5 text-white" />
         </div>
       </CardHeader>
-      <CardContent className="relative">
+      <CardContent>
         <div className="text-3xl font-bold tracking-tight">{value}</div>
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        <p className="text-xs text-white/70 mt-1">{description}</p>
       </CardContent>
     </Card>
   )
@@ -203,20 +196,28 @@ interface SecondaryStatCardProps {
   title: string
   value: number
   icon: React.ComponentType<{ className?: string }>
+  borderColor: string
+  iconBg: string
+  iconColor: string
 }
 
 function SecondaryStatCard({
   title,
   value,
   icon: Icon,
+  borderColor,
+  iconBg,
+  iconColor,
 }: SecondaryStatCardProps) {
   return (
-    <Card>
+    <Card className={`border-l-4 ${borderColor} shadow-sm`}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {title}
         </CardTitle>
-        <Icon className="size-4 text-muted-foreground" />
+        <div className={`flex size-8 items-center justify-center rounded-lg ${iconBg}`}>
+          <Icon className={`size-4 ${iconColor}`} />
+        </div>
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold">{value}</div>
@@ -240,7 +241,7 @@ function QueueOverview({ waiting, active, completed }: QueueOverviewProps) {
   const completedPct = total > 0 ? (completed / total) * 100 : 0
 
   return (
-    <Card>
+    <Card className="shadow-sm">
       <CardHeader>
         <CardTitle className="text-base">Queue Overview</CardTitle>
         <CardDescription>
@@ -248,23 +249,23 @@ function QueueOverview({ waiting, active, completed }: QueueOverviewProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Visual bar */}
+        {/* Visual gradient bar */}
         <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
           {completedPct > 0 && (
             <div
-              className="bg-emerald-500 transition-all"
+              className="bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
               style={{ width: `${completedPct}%` }}
             />
           )}
           {activePct > 0 && (
             <div
-              className="bg-amber-500 transition-all"
+              className="bg-gradient-to-r from-amber-400 to-amber-600 transition-all"
               style={{ width: `${activePct}%` }}
             />
           )}
           {waitPct > 0 && (
             <div
-              className="bg-sky-500 transition-all"
+              className="bg-gradient-to-r from-sky-400 to-sky-600 transition-all"
               style={{ width: `${waitPct}%` }}
             />
           )}
@@ -272,26 +273,26 @@ function QueueOverview({ waiting, active, completed }: QueueOverviewProps) {
 
         {/* Legend items */}
         <div className="grid grid-cols-3 gap-4">
-          <div className="flex flex-col items-center gap-1.5 rounded-lg border p-3">
-            <div className="flex size-8 items-center justify-center rounded-full bg-sky-100 dark:bg-sky-900/30">
-              <Clock className="size-4 text-sky-600 dark:text-sky-400" />
+          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-sky-100 p-3 dark:border-sky-800 dark:from-sky-950/50 dark:to-sky-900/30">
+            <div className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-sky-600 shadow-sm">
+              <Clock className="size-4 text-white" />
             </div>
-            <span className="text-2xl font-bold">{waiting}</span>
-            <span className="text-xs text-muted-foreground">Waiting</span>
+            <span className="text-2xl font-bold text-sky-700 dark:text-sky-300">{waiting}</span>
+            <span className="text-xs text-sky-600/70 dark:text-sky-400/70">Waiting</span>
           </div>
-          <div className="flex flex-col items-center gap-1.5 rounded-lg border p-3">
-            <div className="flex size-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
-              <Users className="size-4 text-amber-600 dark:text-amber-400" />
+          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100 p-3 dark:border-amber-800 dark:from-amber-950/50 dark:to-amber-900/30">
+            <div className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 shadow-sm">
+              <Users className="size-4 text-white" />
             </div>
-            <span className="text-2xl font-bold">{active}</span>
-            <span className="text-xs text-muted-foreground">Active</span>
+            <span className="text-2xl font-bold text-amber-700 dark:text-amber-300">{active}</span>
+            <span className="text-xs text-amber-600/70 dark:text-amber-400/70">Active</span>
           </div>
-          <div className="flex flex-col items-center gap-1.5 rounded-lg border p-3">
-            <div className="flex size-8 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-              <CheckCircle className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 dark:border-emerald-800 dark:from-emerald-950/50 dark:to-emerald-900/30">
+            <div className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-sm">
+              <CheckCircle className="size-4 text-white" />
             </div>
-            <span className="text-2xl font-bold">{completed}</span>
-            <span className="text-xs text-muted-foreground">Completed</span>
+            <span className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{completed}</span>
+            <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70">Completed</span>
           </div>
         </div>
       </CardContent>
@@ -309,7 +310,7 @@ function RecentSessionsTable({ sessions }: RecentSessionsTableProps) {
   const { setCurrentPage, setSelectedEventId } = useAppStore()
 
   return (
-    <Card>
+    <Card className="shadow-sm">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -441,32 +442,28 @@ export default function DashboardPage() {
             value={analytics?.totalOrganizations ?? 0}
             description="Total registered organizations"
             icon={Building2}
-            iconBg="bg-violet-100 dark:bg-violet-900/30"
-            iconColor="text-violet-600 dark:text-violet-400"
+            gradient="from-violet-500 to-purple-700"
           />
           <PrimaryStatCard
             title="Active Events"
             value={analytics?.activeEvents ?? 0}
             description="Events currently running"
             icon={Calendar}
-            iconBg="bg-emerald-100 dark:bg-emerald-900/30"
-            iconColor="text-emerald-600 dark:text-emerald-400"
+            gradient="from-emerald-500 to-emerald-700"
           />
           <PrimaryStatCard
             title="Completed Sessions"
             value={analytics?.completedSessions ?? 0}
             description="Sessions finished successfully"
             icon={CheckCircle}
-            iconBg="bg-sky-100 dark:bg-sky-900/30"
-            iconColor="text-sky-600 dark:text-sky-400"
+            gradient="from-teal-500 to-cyan-700"
           />
           <PrimaryStatCard
             title="Queue Waiting"
             value={analytics?.waitingInQueue ?? 0}
             description="Guests currently in queue"
             icon={Clock}
-            iconBg="bg-amber-100 dark:bg-amber-900/30"
-            iconColor="text-amber-600 dark:text-amber-400"
+            gradient="from-amber-500 to-amber-700"
           />
         </div>
       )}
@@ -484,21 +481,33 @@ export default function DashboardPage() {
             title="Total Events"
             value={analytics?.totalEvents ?? 0}
             icon={Calendar}
+            borderColor="border-l-violet-500"
+            iconBg="bg-violet-100 dark:bg-violet-900/30"
+            iconColor="text-violet-600 dark:text-violet-400"
           />
           <SecondaryStatCard
             title="Total Sessions"
             value={analytics?.totalSessions ?? 0}
             icon={Users}
+            borderColor="border-l-emerald-500"
+            iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+            iconColor="text-emerald-600 dark:text-emerald-400"
           />
           <SecondaryStatCard
             title="Gallery Photos"
             value={analytics?.totalGallery ?? 0}
             icon={ImageIcon}
+            borderColor="border-l-teal-500"
+            iconBg="bg-teal-100 dark:bg-teal-900/30"
+            iconColor="text-teal-600 dark:text-teal-400"
           />
           <SecondaryStatCard
             title="Total Devices"
             value={analytics?.totalDevices ?? 0}
             icon={Monitor}
+            borderColor="border-l-amber-500"
+            iconBg="bg-amber-100 dark:bg-amber-900/30"
+            iconColor="text-amber-600 dark:text-amber-400"
           />
         </div>
       )}
@@ -557,12 +566,12 @@ export default function DashboardPage() {
       {!isLoading && analytics && (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
           <Card
-            className="cursor-pointer transition-colors hover:bg-muted/50"
+            className="cursor-pointer border-l-4 border-l-emerald-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20"
             onClick={() => setCurrentPage('events')}
           >
             <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                <Calendar className="size-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-sm">
+                <Calendar className="size-5 text-white" />
               </div>
               <div>
                 <CardTitle className="text-sm font-medium">
@@ -576,12 +585,12 @@ export default function DashboardPage() {
           </Card>
 
           <Card
-            className="cursor-pointer transition-colors hover:bg-muted/50"
+            className="cursor-pointer border-l-4 border-l-sky-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-sky-50/50 dark:hover:bg-sky-950/20"
             onClick={() => setCurrentPage('sessions')}
           >
             <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-900/30">
-                <Camera className="size-5 text-sky-600 dark:text-sky-400" />
+              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 shadow-sm">
+                <Camera className="size-5 text-white" />
               </div>
               <div>
                 <CardTitle className="text-sm font-medium">
@@ -595,12 +604,12 @@ export default function DashboardPage() {
           </Card>
 
           <Card
-            className="cursor-pointer transition-colors hover:bg-muted/50"
+            className="cursor-pointer border-l-4 border-l-amber-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-amber-50/50 dark:hover:bg-amber-950/20"
             onClick={() => setCurrentPage('queue')}
           >
             <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                <Clock className="size-5 text-amber-600 dark:text-amber-400" />
+              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 shadow-sm">
+                <Clock className="size-5 text-white" />
               </div>
               <div>
                 <CardTitle className="text-sm font-medium">
