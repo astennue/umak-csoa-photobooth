@@ -54,7 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
-import { Plus, MoreHorizontal, Pencil, Trash2, Users, Search } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Trash2, Users, Search, Eye, EyeOff, KeyRound, Info } from 'lucide-react'
 import { useState } from 'react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -74,6 +74,7 @@ interface UserRecord {
   createdAt: string
   updatedAt: string
   organization: OrgOption | null
+  visiblePassword: string | null
 }
 
 interface UsersResponse {
@@ -115,6 +116,33 @@ function getRoleBadge(role: string) {
   )
 }
 
+// ─── Password Cell ────────────────────────────────────────────────────────────
+
+function PasswordCell({ password }: { password: string | null }) {
+  const [visible, setVisible] = useState(false)
+
+  if (password === null) {
+    return <span className="text-muted-foreground">—</span>
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-mono text-xs tracking-wider">
+        {visible ? password : '••••••••'}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+        onClick={() => setVisible(!visible)}
+        tabIndex={-1}
+      >
+        {visible ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+      </Button>
+    </div>
+  )
+}
+
 // ─── Skeleton Loader ──────────────────────────────────────────────────────
 
 function TableSkeleton() {
@@ -153,6 +181,8 @@ export default function UsersPage() {
   const [formPassword, setFormPassword] = useState('')
   const [formRole, setFormRole] = useState('FACILITATOR')
   const [formOrgId, setFormOrgId] = useState('')
+  const [showFormPassword, setShowFormPassword] = useState(false)
+  const [showEditPassword, setShowEditPassword] = useState(false)
 
   // Fetch users - scoped to org
   const { data: usersData, isLoading } = useQuery<UsersResponse>({
@@ -293,6 +323,10 @@ export default function UsersPage() {
       toast.error('Please fill in all required fields')
       return
     }
+    if (currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && !formOrgId) {
+      toast.error('Organization is required for Org Admin role')
+      return
+    }
     createMutation.mutate({
       email: formEmail,
       password: formPassword,
@@ -305,6 +339,10 @@ export default function UsersPage() {
   function handleUpdate() {
     if (!selectedUser || !formName || !formEmail) {
       toast.error('Please fill in all required fields')
+      return
+    }
+    if (currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && !formOrgId) {
+      toast.error('Organization is required for Org Admin role')
       return
     }
     updateMutation.mutate({
@@ -383,6 +421,7 @@ export default function UsersPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Password</TableHead>
                     <TableHead>Organization</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-12"></TableHead>
@@ -391,7 +430,7 @@ export default function UsersPage() {
                 <TableBody>
                   {filteredUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="h-24 text-center">
+                      <TableCell colSpan={7} className="h-24 text-center">
                         <div className="flex flex-col items-center gap-2">
                           <Users className="size-8 text-emerald-400/60" />
                           <span className="text-muted-foreground">No users found.</span>
@@ -404,6 +443,9 @@ export default function UsersPage() {
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                         <TableCell>{getRoleBadge(user.role)}</TableCell>
+                        <TableCell>
+                          <PasswordCell password={user.visiblePassword} />
+                        </TableCell>
                         <TableCell className="text-sm">
                           {user.organization?.name || '—'}
                         </TableCell>
@@ -465,6 +507,12 @@ export default function UsersPage() {
               Add a new user to the system.
             </DialogDescription>
           </DialogHeader>
+          <div className="rounded-lg border bg-muted/50 p-3 flex items-start gap-2.5">
+            <KeyRound className="size-4 text-muted-foreground mt-0.5 shrink-0" />
+            <p className="text-xs text-muted-foreground">
+              Passwords are visible to authorized administrators (Super Admin and Org Admin) for account management purposes.
+            </p>
+          </div>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="create-name">Name *</Label>
@@ -487,17 +535,30 @@ export default function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="create-password">Password *</Label>
-              <Input
-                id="create-password"
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                placeholder="Min. 8 characters"
-              />
+              <div className="relative">
+                <Input
+                  id="create-password"
+                  type={showFormPassword ? 'text' : 'password'}
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  placeholder="Min. 8 characters"
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 size-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowFormPassword(!showFormPassword)}
+                  tabIndex={-1}
+                >
+                  {showFormPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="create-role">Role *</Label>
-              <Select value={formRole} onValueChange={setFormRole}>
+              <Select value={formRole} onValueChange={(val) => { setFormRole(val); if (val !== 'ORG_ADMIN' && val !== 'FACILITATOR') setFormOrgId('') }}>
                 <SelectTrigger id="create-role">
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
@@ -510,12 +571,29 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
-            {currentRole === 'SUPER_ADMIN' && (
+            {currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && (
+              <div className="space-y-2">
+                <Label htmlFor="create-org">Organization *</Label>
+                <Select value={formOrgId} onValueChange={setFormOrgId}>
+                  <SelectTrigger id="create-org">
+                    <SelectValue placeholder="Select organization (required)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableOrgs.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>
+                        {org.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {currentRole === 'SUPER_ADMIN' && formRole === 'FACILITATOR' && (
               <div className="space-y-2">
                 <Label htmlFor="create-org">Organization</Label>
                 <Select value={formOrgId} onValueChange={setFormOrgId}>
                   <SelectTrigger id="create-org">
-                    <SelectValue placeholder="Select organization" />
+                    <SelectValue placeholder="Select organization (optional)" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableOrgs.map((org) => (
@@ -583,17 +661,30 @@ export default function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-password">New Password</Label>
-              <Input
-                id="edit-password"
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                placeholder="Leave blank to keep current"
-              />
+              <div className="relative">
+                <Input
+                  id="edit-password"
+                  type={showEditPassword ? 'text' : 'password'}
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  placeholder="Leave blank to keep current"
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 size-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowEditPassword(!showEditPassword)}
+                  tabIndex={-1}
+                >
+                  {showEditPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-role">Role *</Label>
-              <Select value={formRole} onValueChange={setFormRole}>
+              <Select value={formRole} onValueChange={(val) => { setFormRole(val); if (val !== 'ORG_ADMIN' && val !== 'FACILITATOR') setFormOrgId('') }}>
                 <SelectTrigger id="edit-role">
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
@@ -606,12 +697,29 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
-            {currentRole === 'SUPER_ADMIN' && (
+            {currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-org">Organization *</Label>
+                <Select value={formOrgId} onValueChange={setFormOrgId}>
+                  <SelectTrigger id="edit-org">
+                    <SelectValue placeholder="Select organization (required)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableOrgs.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>
+                        {org.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {currentRole === 'SUPER_ADMIN' && formRole === 'FACILITATOR' && (
               <div className="space-y-2">
                 <Label htmlFor="edit-org">Organization</Label>
                 <Select value={formOrgId} onValueChange={setFormOrgId}>
                   <SelectTrigger id="edit-org">
-                    <SelectValue placeholder="Select organization" />
+                    <SelectValue placeholder="Select organization (optional)" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableOrgs.map((org) => (

@@ -398,16 +398,10 @@ export default function DashboardPage() {
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
-  // Build analytics URL with user scope
-  const analyticsParams = new URLSearchParams()
-  if (currentRole && currentOrgId) {
-    analyticsParams.set('userRole', currentRole)
-    analyticsParams.set('userOrgId', currentOrgId)
-  }
-
+  // Analytics API uses server-side getAuthContext() for auth scoping
   const { data, isLoading, isError } = useQuery<AnalyticsResponse>({
-    queryKey: ['analytics', currentRole, currentOrgId],
-    queryFn: () => fetch(`/api/analytics?${analyticsParams.toString()}`).then((r) => r.json()),
+    queryKey: ['analytics'],
+    queryFn: () => fetch('/api/analytics').then((r) => r.json()),
   })
 
   const analytics = data?.data

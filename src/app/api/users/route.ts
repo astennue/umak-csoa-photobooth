@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils'
 import { NextRequest } from 'next/server'
 import { getAuthContext } from '@/lib/auth'
+import { decrypt } from '@/lib/crypto'
 
 export async function GET(request: NextRequest) {
   try {
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
           role: true,
           organizationId: true,
           active: true,
+          plainPassword: true,
           createdAt: true,
           updatedAt: true,
           organization: {
@@ -54,7 +56,32 @@ export async function GET(request: NextRequest) {
       db.user.count({ where }),
     ])
 
-    return successResponse(users, 200, { total, limit })
+    // Add visible passwords based on RBAC
+    const usersWithPasswords = users.map((user) => {
+      let visiblePassword: string | null = null
+
+      if (ctx.role === 'SUPER_ADMIN') {
+        // SUPER_ADMIN can see ALL passwords
+        visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
+      } else if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+        // ORG_ADMIN can see passwords of users in their org + their own
+        if (user.organizationId === ctx.organizationId || user.id === ctx.userId) {
+          // But NOT SuperAdmin passwords
+          if (user.role !== 'SUPER_ADMIN') {
+            visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
+          }
+        }
+      }
+
+      // Remove plainPassword from response, add visiblePassword
+      const { plainPassword, ...userWithoutPlainPassword } = user
+      return {
+        ...userWithoutPlainPassword,
+        visiblePassword,
+      }
+    })
+
+    return successResponse(usersWithPasswords, 200, { total, limit })
   } catch (err: any) {
     return errorResponse(err.message, 500)
   }

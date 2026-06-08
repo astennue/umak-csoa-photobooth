@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import {
   Calendar,
   Plus,
@@ -238,7 +238,6 @@ async function updateEvent(id: string, data: Partial<EventFormData>, userRole?: 
 // --- Component ---
 export default function EventsPage() {
   const queryClient = useQueryClient()
-  const { toast } = useToast()
   const { setCurrentPage } = useAppStore()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
@@ -292,12 +291,12 @@ export default function EventsPage() {
     mutationFn: (data: EventFormData) => createEvent(data, currentRole, currentOrgId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
-      toast({ title: 'Event created', description: 'The event has been created successfully.' })
+      toast.success('Event created', { description: 'The event has been created successfully.' })
       setCreateOpen(false)
       resetForm()
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -305,12 +304,12 @@ export default function EventsPage() {
     mutationFn: ({ id, data }: { id: string; data: Partial<EventFormData> }) => updateEvent(id, data, currentRole, currentOrgId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
-      toast({ title: 'Event updated', description: 'The event has been updated successfully.' })
+      toast.success('Event updated', { description: 'The event has been updated successfully.' })
       setEditOpen(false)
       resetForm()
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 

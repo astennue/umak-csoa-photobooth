@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import bcrypt from 'bcryptjs'
+import { encrypt } from './crypto'
 
 const SALT_ROUNDS = 12
 
@@ -73,10 +74,12 @@ export async function runSeed(): Promise<void> {
 
   for (const account of SUPER_ADMIN_ACCOUNTS) {
     const hashedPassword = await bcrypt.hash(account.password, SALT_ROUNDS)
+    const encryptedPassword = encrypt(account.password)
     await db.user.upsert({
       where: { email: account.email },
       update: {
         password: hashedPassword,
+        plainPassword: encryptedPassword,
         name: account.name,
         role: account.role,
         active: true,
@@ -84,6 +87,7 @@ export async function runSeed(): Promise<void> {
       create: {
         email: account.email,
         password: hashedPassword,
+        plainPassword: encryptedPassword,
         name: account.name,
         role: account.role,
         active: true,

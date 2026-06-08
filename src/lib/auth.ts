@@ -1,4 +1,5 @@
 import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth-options'
 
 export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'FACILITATOR'
 
@@ -14,7 +15,7 @@ export interface AuthContext {
  * Use this in API routes to determine role-based filtering.
  */
 export async function getAuthContext(): Promise<AuthContext> {
-  const session = await getServerSession()
+  const session = await getServerSession(authOptions)
 
   if (!session?.user) {
     return {

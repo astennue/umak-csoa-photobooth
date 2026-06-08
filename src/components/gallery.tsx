@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 import {
   ImageIcon,
@@ -73,7 +73,6 @@ interface SessionOption {
 }
 
 export default function GalleryPage() {
-  const { toast } = useToast()
   const queryClient = useQueryClient()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
@@ -186,12 +185,12 @@ export default function GalleryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gallery'] })
-      toast({ title: 'Photo uploaded', description: 'The photo has been added to the gallery.' })
+      toast.success('Photo uploaded', { description: 'The photo has been added to the gallery.' })
       resetForm()
       setUploadOpen(false)
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -211,7 +210,7 @@ export default function GalleryPage() {
       queryClient.invalidateQueries({ queryKey: ['gallery'] })
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -226,7 +225,7 @@ export default function GalleryPage() {
 
   function handleUpload() {
     if (!formEventId || !formPhotoUrl.trim()) {
-      toast({ title: 'Validation Error', description: 'Event and Photo URL are required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Event and Photo URL are required.' })
       return
     }
     uploadMutation.mutate({

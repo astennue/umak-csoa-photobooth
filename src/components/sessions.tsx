@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useAppStore } from '@/lib/store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -148,7 +148,6 @@ const emptyForm: SessionFormData = {
 
 // --- Main Component ---
 export default function SessionsPage() {
-  const { toast } = useToast()
   const queryClient = useQueryClient()
   const { selectedEventId } = useAppStore()
   const { data: session } = useSession()
@@ -208,17 +207,17 @@ export default function SessionsPage() {
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {
-        toast({ title: 'Session created', description: 'New session has been created successfully.' })
+        toast.success('Session created', { description: 'New session has been created successfully.' })
         queryClient.invalidateQueries({ queryKey: ['sessions'] })
         setCreateOpen(false)
         setForm(emptyForm)
       } else {
-        toast({ title: 'Error', description: res.error || 'Failed to create session', variant: 'destructive' })
+        toast.error('Error', { description: res.error || 'Failed to create session' })
       }
       setSubmitting(false)
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to create session', variant: 'destructive' })
+      toast.error('Error', { description: 'Failed to create session' })
       setSubmitting(false)
     },
   })
@@ -232,18 +231,18 @@ export default function SessionsPage() {
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {
-        toast({ title: 'Session updated', description: 'Session has been updated successfully.' })
+        toast.success('Session updated', { description: 'Session has been updated successfully.' })
         queryClient.invalidateQueries({ queryKey: ['sessions'] })
         setEditOpen(false)
         setEditingSession(null)
         setForm(emptyForm)
       } else {
-        toast({ title: 'Error', description: res.error || 'Failed to update session', variant: 'destructive' })
+        toast.error('Error', { description: res.error || 'Failed to update session' })
       }
       setSubmitting(false)
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to update session', variant: 'destructive' })
+      toast.error('Error', { description: 'Failed to update session' })
       setSubmitting(false)
     },
   })
@@ -257,21 +256,21 @@ export default function SessionsPage() {
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {
-        toast({ title: 'Status updated', description: `Session status changed to ${STATUS_LABELS[res.data.status] || res.data.status}.` })
+        toast.success('Status updated', { description: `Session status changed to ${STATUS_LABELS[res.data.status] || res.data.status}.` })
         queryClient.invalidateQueries({ queryKey: ['sessions'] })
       } else {
-        toast({ title: 'Error', description: res.error || 'Failed to update status', variant: 'destructive' })
+        toast.error('Error', { description: res.error || 'Failed to update status' })
       }
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' })
+      toast.error('Error', { description: 'Failed to update status' })
     },
   })
 
   // Handlers
   function handleCreate() {
     if (!form.eventId || !form.guestName.trim()) {
-      toast({ title: 'Validation Error', description: 'Event and Guest Name are required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Event and Guest Name are required.' })
       return
     }
     setSubmitting(true)
@@ -280,7 +279,7 @@ export default function SessionsPage() {
 
   function handleEdit() {
     if (!editingSession || !form.guestName.trim()) {
-      toast({ title: 'Validation Error', description: 'Guest Name is required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Guest Name is required.' })
       return
     }
     setSubmitting(true)

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { formatDistanceToNow, format } from 'date-fns'
 import {
   Monitor,
@@ -107,7 +107,6 @@ const TYPE_CONFIG: Record<DeviceType, { label: string; badgeClass: string; icon:
 }
 
 export default function DevicesPage() {
-  const { toast } = useToast()
   const queryClient = useQueryClient()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
@@ -184,12 +183,12 @@ export default function DevicesPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['devices'] })
-      toast({ title: 'Device registered', description: 'The device has been registered successfully.' })
+      toast.success('Device registered', { description: 'The device has been registered successfully.' })
       resetForm()
       setRegisterOpen(false)
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -204,7 +203,7 @@ export default function DevicesPage() {
 
   function handleRegister() {
     if (!formEventId || !formName.trim()) {
-      toast({ title: 'Validation Error', description: 'Event and Device Name are required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Event and Device Name are required.' })
       return
     }
     registerMutation.mutate({

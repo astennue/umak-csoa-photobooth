@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useAppStore } from '@/lib/store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -282,7 +282,6 @@ function QueueCard({
 
 // --- Main Component ---
 export default function QueuePage() {
-  const { toast } = useToast()
   const queryClient = useQueryClient()
   const { selectedEventId } = useAppStore()
   const { data: session } = useSession()
@@ -353,17 +352,17 @@ export default function QueuePage() {
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {
-        toast({ title: 'Added to queue', description: `${res.data.name} has been added to the queue at position #${res.data.position}.` })
+        toast.success('Added to queue', { description: `${res.data.name} has been added to the queue at position #${res.data.position}.` })
         queryClient.invalidateQueries({ queryKey: ['queue'] })
         setCreateOpen(false)
         setForm(emptyForm)
       } else {
-        toast({ title: 'Error', description: res.error || 'Failed to add to queue', variant: 'destructive' })
+        toast.error('Error', { description: res.error || 'Failed to add to queue' })
       }
       setSubmitting(false)
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to add to queue', variant: 'destructive' })
+      toast.error('Error', { description: 'Failed to add to queue' })
       setSubmitting(false)
     },
   })
@@ -377,21 +376,21 @@ export default function QueuePage() {
       }).then(r => r.json()),
     onSuccess: (res) => {
       if (res.success) {
-        toast({ title: 'Status updated', description: `Queue entry updated to ${STATUS_LABELS[res.data.status] || res.data.status}.` })
+        toast.success('Status updated', { description: `Queue entry updated to ${STATUS_LABELS[res.data.status] || res.data.status}.` })
         queryClient.invalidateQueries({ queryKey: ['queue'] })
       } else {
-        toast({ title: 'Error', description: res.error || 'Failed to update status', variant: 'destructive' })
+        toast.error('Error', { description: res.error || 'Failed to update status' })
       }
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' })
+      toast.error('Error', { description: 'Failed to update status' })
     },
   })
 
   // Handlers
   function handleCreate() {
     if (!form.eventId || !form.name.trim()) {
-      toast({ title: 'Validation Error', description: 'Event and Name are required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Event and Name are required.' })
       return
     }
     setSubmitting(true)

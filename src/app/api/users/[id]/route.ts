@@ -3,6 +3,21 @@ import { successResponse, errorResponse } from '@/lib/api-utils'
 import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { getAuthContext, canAccessOrg } from '@/lib/auth'
+import { encrypt, decrypt } from '@/lib/crypto'
+
+// Helper to determine if a user can see the password of another user
+function canSeePassword(ctx: { role: string | null; userId: string | null; organizationId: string | null }, targetUser: { id: string; role: string; organizationId: string | null }): boolean {
+  if (!ctx.role || !ctx.userId) return false
+  // SUPER_ADMIN can see ALL passwords
+  if (ctx.role === 'SUPER_ADMIN') return true
+  // ORG_ADMIN can see passwords of users in their org (but NOT SuperAdmin passwords) + their own
+  if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+    if (targetUser.role === 'SUPER_ADMIN') return false
+    return targetUser.organizationId === ctx.organizationId || targetUser.id === ctx.userId
+  }
+  // FACILITATOR cannot see any passwords
+  return false
+}
 
 export async function GET(
   request: NextRequest,
@@ -24,6 +39,7 @@ export async function GET(
         role: true,
         organizationId: true,
         active: true,
+        plainPassword: true,
         createdAt: true,
         updatedAt: true,
         organization: {
@@ -41,7 +57,13 @@ export async function GET(
       return errorResponse('You can only view users in your organization', 403)
     }
 
-    return successResponse(user)
+    // Add visible password
+    const visiblePassword = canSeePassword(ctx, user) && user.plainPassword
+      ? decrypt(user.plainPassword)
+      : null
+
+    const { plainPassword, ...userWithoutPlainPassword } = user
+    return successResponse({ ...userWithoutPlainPassword, visiblePassword })
   } catch (err: any) {
     return errorResponse(err.message, 500)
   }
@@ -108,6 +130,7 @@ export async function PUT(
     if (active !== undefined) data.active = active
     if (password) {
       data.password = await bcrypt.hash(password, 12)
+      data.plainPassword = encrypt(password)
     }
 
     const user = await db.user.update({

@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { Building2, Plus, Search, Pencil, Trash2, MoreHorizontal, Shield } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -96,7 +96,6 @@ const defaultFormData: OrgFormData = {
 // --- Component ---
 export default function OrganizationsPage() {
   const queryClient = useQueryClient()
-  const { toast } = useToast()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
@@ -148,12 +147,12 @@ export default function OrganizationsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
-      toast({ title: 'Organization created', description: 'The organization has been created successfully.' })
+      toast.success('Organization created', { description: 'The organization has been created successfully.' })
       setCreateOpen(false)
       resetForm()
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -170,12 +169,12 @@ export default function OrganizationsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
-      toast({ title: 'Organization updated', description: 'The organization has been updated successfully.' })
+      toast.success('Organization updated', { description: 'The organization has been updated successfully.' })
       setEditOpen(false)
       resetForm()
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -189,12 +188,12 @@ export default function OrganizationsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
-      toast({ title: 'Organization deleted', description: 'The organization has been deleted successfully.' })
+      toast.success('Organization deleted', { description: 'The organization has been deleted successfully.' })
       setDeleteOpen(false)
       setSelectedOrg(null)
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 

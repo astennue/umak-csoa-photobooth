@@ -1,25 +1,23 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Camera, CameraOff, ImageIcon, Palette, Sparkles, Aperture } from 'lucide-react'
+import { Camera, CameraOff, ImageIcon, Palette, Sparkles, Aperture, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
 // ── Background option types ─────────────────────────────────────────
-type BackgroundType = 'none' | 'blur' | 'color' | 'gradient' | 'image'
+type BackgroundType = 'none' | 'blur' | 'color' | 'gradient' | 'image' | 'custom'
 
 interface BackgroundOption {
   id: string
   type: BackgroundType
   label: string
-  /** CSS class or value for the background */
   value: string
-  /** Thumbnail preview style — tailwind bg class or CSS gradient */
   preview: string
 }
 
-// ── Available backgrounds ───────────────────────────────────────────
-const BACKGROUNDS: BackgroundOption[] = [
+// ── Built-in backgrounds ───────────────────────────────────────────
+const BUILT_IN_BACKGROUNDS: BackgroundOption[] = [
   { id: 'none', type: 'none', label: 'None', value: '', preview: 'bg-stone-700' },
   { id: 'blur', type: 'blur', label: 'Blur', value: '', preview: 'bg-stone-600 blur-[2px]' },
   // Solid colors
@@ -56,10 +54,6 @@ const BACKGROUNDS: BackgroundOption[] = [
     value: 'linear-gradient(135deg, #312e81 0%, #581c87 50%, #831843 100%)',
     preview: 'bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900',
   },
-  // Image placeholders
-  { id: 'img-1', type: 'image', label: 'Background 1', value: '/backgrounds/bg-1.jpg', preview: 'bg-stone-500' },
-  { id: 'img-2', type: 'image', label: 'Background 2', value: '/backgrounds/bg-2.jpg', preview: 'bg-stone-400' },
-  { id: 'img-3', type: 'image', label: 'Background 3', value: '/backgrounds/bg-3.jpg', preview: 'bg-stone-600' },
 ]
 
 // ── Component props ─────────────────────────────────────────────────
@@ -73,6 +67,9 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const [selectedBg, setSelectedBg] = useState<string>('none')
   const [error, setError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
+  const [customBackgrounds, setCustomBackgrounds] = useState<BackgroundOption[]>([])
+  const [modelLoading, setModelLoading] = useState(false)
+  const [segmentationReady, setSegmentationReady] = useState(false)
 
   // ── Refs ──────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -80,11 +77,77 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const streamRef = useRef<MediaStream | null>(null)
   const bgImageRef = useRef<HTMLImageElement | null>(null)
   const animFrameRef = useRef<number>(0)
+  const segmentationRef = useRef<any>(null)
+  const latestResultsRef = useRef<any>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // All backgrounds (built-in + custom)
+  const allBackgrounds = [...BUILT_IN_BACKGROUNDS, ...customBackgrounds]
+
+  // ── Initialize MediaPipe Selfie Segmentation ──────────────────────
+  useEffect(() => {
+    let mounted = true
+
+    async function initSegmentation() {
+      try {
+        setModelLoading(true)
+        // Dynamic import to avoid SSR issues
+        const { SelfieSegmentation } = await import('@mediapipe/selfie_segmentation')
+
+        if (!mounted) return
+
+        const segmentation = new SelfieSegmentation({
+          locateFile: (file: string) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+          },
+        })
+
+        segmentation.setOptions({
+          modelSelection: 1, // 1 = general model (better quality), 0 = landscape model
+          selfieMode: true,
+        })
+
+        segmentation.onResults((results: any) => {
+          latestResultsRef.current = results
+        })
+
+        segmentationRef.current = segmentation
+
+        // Initialize the model by sending a blank frame
+        const tempCanvas = document.createElement('canvas')
+        tempCanvas.width = 1
+        tempCanvas.height = 1
+        await segmentation.send({ image: tempCanvas })
+
+        if (mounted) {
+          setSegmentationReady(true)
+          setModelLoading(false)
+        }
+      } catch (err) {
+        console.error('Failed to initialize selfie segmentation:', err)
+        if (mounted) {
+          setModelLoading(false)
+          // Fall back to non-segmented mode
+          setSegmentationReady(false)
+        }
+      }
+    }
+
+    initSegmentation()
+
+    return () => {
+      mounted = false
+      if (segmentationRef.current) {
+        segmentationRef.current.close()
+        segmentationRef.current = null
+      }
+    }
+  }, [])
 
   // ── Load background image when an image-type bg is selected ──────
   useEffect(() => {
-    const bg = BACKGROUNDS.find((b) => b.id === selectedBg)
-    if (bg?.type === 'image') {
+    const bg = allBackgrounds.find((b) => b.id === selectedBg)
+    if (bg?.type === 'image' || bg?.type === 'custom') {
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.src = bg.value
@@ -97,10 +160,10 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     } else {
       bgImageRef.current = null
     }
-  }, [selectedBg])
+  }, [selectedBg, customBackgrounds])
 
-  // ── Canvas rendering loop ────────────────────────────────────────
-  const renderLoop = useCallback(() => {
+  // ── Canvas rendering with segmentation ────────────────────────────
+  const renderFrame = useCallback(() => {
     const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return
@@ -110,73 +173,110 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
 
     const width = canvas.width
     const height = canvas.height
+    const bg = allBackgrounds.find((b) => b.id === selectedBg)
 
-    const bg = BACKGROUNDS.find((b) => b.id === selectedBg)
+    // If we have segmentation results, use them for proper virtual background
+    const results = latestResultsRef.current
+    if (results && segmentationReady && bg && bg.type !== 'none') {
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height)
 
-    // Draw background layer
-    if (bg?.type === 'blur') {
-      // For blur, draw the video first (will be blurred via CSS on the video element)
-      // but for canvas capture we apply a simple box-blur approximation
-      ctx.filter = 'blur(12px)'
-      ctx.drawImage(video, 0, 0, width, height)
-      ctx.filter = 'none'
-    } else if (bg?.type === 'color') {
-      ctx.fillStyle = bg.value
-      ctx.fillRect(0, 0, width, height)
-    } else if (bg?.type === 'gradient') {
-      // Create gradient
-      const gradient = ctx.createLinearGradient(0, 0, width, height)
-      // Parse gradient stops from the CSS value
-      const stops = bg.value.match(/(#[0-9a-fA-F]{6})\s+(\d+)%/g)
-      if (stops) {
-        stops.forEach((stop) => {
-          const [color, percent] = stop.split(/\s+/)
-          ctx.fillStyle = color
-          gradient.addColorStop(parseInt(percent) / 100, color)
-        })
+      // Save context state
+      ctx.save()
+
+      // Step 1: Draw the segmentation mask (person mask)
+      // The mask is a grayscale image where white = person, black = background
+      ctx.drawImage(results.segmentationMask, 0, 0, width, height)
+
+      // Step 2: Use 'source-in' to draw ONLY the person from the original image
+      // This keeps only pixels where the mask is white (person area)
+      ctx.globalCompositeOperation = 'source-in'
+      ctx.drawImage(results.image, 0, 0, width, height)
+
+      // Step 3: Draw the background BEHIND the person
+      ctx.globalCompositeOperation = 'destination-over'
+
+      if (bg.type === 'blur') {
+        // Draw blurred video as background
+        ctx.filter = 'blur(12px)'
+        ctx.drawImage(results.image, 0, 0, width, height)
+        ctx.filter = 'none'
+      } else if (bg.type === 'color') {
+        ctx.fillStyle = bg.value
+        ctx.fillRect(0, 0, width, height)
+      } else if (bg.type === 'gradient') {
+        const colors = bg.value.match(/#[0-9a-fA-F]{6}/g)
+        if (colors && colors.length >= 2) {
+          const g = ctx.createLinearGradient(0, 0, width, height)
+          const step = 1 / (colors.length - 1)
+          colors.forEach((c: string, i: number) => {
+            g.addColorStop(Math.min(i * step, 1), c)
+          })
+          ctx.fillStyle = g
+        } else {
+          ctx.fillStyle = '#44403c'
+        }
+        ctx.fillRect(0, 0, width, height)
+      } else if ((bg.type === 'image' || bg.type === 'custom') && bgImageRef.current) {
+        ctx.drawImage(bgImageRef.current, 0, 0, width, height)
       }
-      // Fallback: use first and last colors
-      const colors = bg.value.match(/#[0-9a-fA-F]{6}/g)
-      if (colors && colors.length >= 2) {
-        const g = ctx.createLinearGradient(0, 0, width, height)
-        const step = 1 / (colors.length - 1)
-        colors.forEach((c, i) => {
-          g.addColorStop(Math.min(i * step, 1), c)
-        })
-        ctx.fillStyle = g
-      } else {
-        ctx.fillStyle = '#44403c'
-      }
-      ctx.fillRect(0, 0, width, height)
-    } else if (bg?.type === 'image' && bgImageRef.current) {
-      ctx.drawImage(bgImageRef.current, 0, 0, width, height)
-    }
-    // 'none' type: no background layer needed
 
-    // Draw the video on top
-    if (bg?.type === 'blur') {
-      // For blur mode, the background is already the blurred video
-      // We skip drawing the video again to avoid double-drawing
+      // Restore context
+      ctx.restore()
     } else {
-      // For all other modes, draw the full video frame
-      // Since we don't have ML segmentation, we draw the video as the main content
+      // No segmentation or no background selected - just draw the video
+      ctx.clearRect(0, 0, width, height)
       ctx.drawImage(video, 0, 0, width, height)
     }
 
-    animFrameRef.current = requestAnimationFrame(renderLoop)
-  }, [selectedBg])
+    animFrameRef.current = requestAnimationFrame(renderFrame)
+  }, [selectedBg, segmentationReady, allBackgrounds])
+
+  // ── Process video frames through segmentation ────────────────────
+  useEffect(() => {
+    if (!cameraActive || !videoRef.current || !segmentationRef.current) return
+
+    let processing = false
+    let cancelled = false
+
+    async function processFrame() {
+      if (cancelled) return
+      const video = videoRef.current
+      const segmentation = segmentationRef.current
+
+      if (video && segmentation && video.readyState >= 2 && !processing) {
+        processing = true
+        try {
+          await segmentation.send({ image: video })
+        } catch {
+          // Ignore segmentation errors (can happen during camera stop)
+        }
+        processing = false
+      }
+
+      if (!cancelled && cameraActive) {
+        requestAnimationFrame(processFrame)
+      }
+    }
+
+    processFrame()
+
+    return () => {
+      cancelled = true
+    }
+  }, [cameraActive, segmentationReady])
 
   // ── Start / stop render loop ─────────────────────────────────────
   useEffect(() => {
     if (cameraActive && videoRef.current && canvasRef.current) {
-      animFrameRef.current = requestAnimationFrame(renderLoop)
+      animFrameRef.current = requestAnimationFrame(renderFrame)
     }
     return () => {
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current)
       }
     }
-  }, [cameraActive, renderLoop])
+  }, [cameraActive, renderFrame])
 
   // ── Set canvas dimensions when video metadata loads ──────────────
   const handleVideoLoaded = useCallback(() => {
@@ -229,6 +329,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
+    latestResultsRef.current = null
     setCameraActive(false)
   }, [])
 
@@ -253,75 +354,73 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
   }, [cameraActive, startCamera, stopCamera])
 
-  // ── Take photo ───────────────────────────────────────────────────
-  const takePhoto = useCallback(() => {
-    const canvas = canvasRef.current
-    const video = videoRef.current
-    if (!canvas || !video) return
+  // ── Handle custom background upload ──────────────────────────────
+  const handleCustomBgUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-    setCapturing(true)
-
-    // If camera is not active, just capture nothing meaningful
-    if (!cameraActive) {
-      setCapturing(false)
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file (JPG, PNG, etc.)')
       return
     }
 
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Image must be less than 10MB')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string
+      const newBg: BackgroundOption = {
+        id: `custom-${Date.now()}`,
+        type: 'custom',
+        label: file.name.replace(/\.[^/.]+$/, '').slice(0, 12),
+        value: dataUrl,
+        preview: 'bg-stone-500',
+      }
+      setCustomBackgrounds((prev) => [...prev, newBg])
+      setSelectedBg(newBg.id)
+    }
+    reader.readAsDataURL(file)
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
+
+  // ── Remove custom background ─────────────────────────────────────
+  const removeCustomBg = useCallback((bgId: string) => {
+    setCustomBackgrounds((prev) => prev.filter((b) => b.id !== bgId))
+    if (selectedBg === bgId) {
+      setSelectedBg('none')
+    }
+  }, [selectedBg])
+
+  // ── Take photo ───────────────────────────────────────────────────
+  const takePhoto = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !cameraActive) return
+
+    setCapturing(true)
+
     try {
-      // Make sure canvas is the right size
-      const w = video.videoWidth || 640
-      const h = video.videoHeight || 480
-      canvas.width = w
-      canvas.height = h
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-
-      const bg = BACKGROUNDS.find((b) => b.id === selectedBg)
-
-      // Draw background
-      if (bg?.type === 'blur') {
-        ctx.filter = 'blur(12px)'
-        ctx.drawImage(video, 0, 0, w, h)
-        ctx.filter = 'none'
-      } else if (bg?.type === 'color') {
-        ctx.fillStyle = bg.value
-        ctx.fillRect(0, 0, w, h)
-      } else if (bg?.type === 'gradient') {
-        const colors = bg.value.match(/#[0-9a-fA-F]{6}/g)
-        if (colors && colors.length >= 2) {
-          const g = ctx.createLinearGradient(0, 0, w, h)
-          const step = 1 / (colors.length - 1)
-          colors.forEach((c, i) => {
-            g.addColorStop(Math.min(i * step, 1), c)
-          })
-          ctx.fillStyle = g
-        } else {
-          ctx.fillStyle = '#44403c'
-        }
-        ctx.fillRect(0, 0, w, h)
-      } else if (bg?.type === 'image' && bgImageRef.current) {
-        ctx.drawImage(bgImageRef.current, 0, 0, w, h)
-      }
-
-      // Draw video on top (unless blur — blur already has the video)
-      if (bg?.type !== 'blur') {
-        ctx.drawImage(video, 0, 0, w, h)
-      }
-
-      // Capture the composite
+      // The canvas already has the composited image (person + background)
+      // Just capture it directly
       const dataUrl = canvas.toDataURL('image/png')
       onCapture?.(dataUrl)
     } catch {
-      // Canvas tainted or other error — silently ignore
+      // Canvas tainted or other error
     } finally {
       setTimeout(() => setCapturing(false), 300)
     }
-  }, [cameraActive, selectedBg, onCapture])
+  }, [cameraActive, onCapture])
 
-  // ── Current background for live preview styling ──────────────────
-  const currentBg = BACKGROUNDS.find((b) => b.id === selectedBg)
-  const isBlurMode = currentBg?.type === 'blur'
+  // ── Current background for UI ────────────────────────────────────
+  const currentBg = allBackgrounds.find((b) => b.id === selectedBg)
 
   // ── Render ───────────────────────────────────────────────────────
   return (
@@ -330,7 +429,6 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
         {/* ── Camera Preview Area ──────────────────────────────────── */}
         <div className="relative w-full aspect-video bg-stone-800 rounded-lg overflow-hidden border border-stone-700">
           {error ? (
-            // ── Error State ────────────────────────────────────────
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
               <div className="size-14 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
                 <CameraOff className="size-7 text-red-400" />
@@ -346,7 +444,6 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
               </Button>
             </div>
           ) : !cameraActive ? (
-            // ── Inactive State ─────────────────────────────────────
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
               <div className="size-16 rounded-full bg-stone-700/50 flex items-center justify-center mb-4">
                 <Camera className="size-8 text-stone-400" />
@@ -355,111 +452,125 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
               <p className="text-xs text-stone-500 mt-1">Click the button below to start</p>
             </div>
           ) : (
-            // ── Live Preview ───────────────────────────────────────
             <>
-              {/* Background layer (visible behind video) */}
-              {currentBg?.type === 'color' && (
-                <div
-                  className="absolute inset-0"
-                  style={{ backgroundColor: currentBg.value }}
-                />
-              )}
-              {currentBg?.type === 'gradient' && (
-                <div
-                  className="absolute inset-0"
-                  style={{ background: currentBg.value }}
-                />
-              )}
-              {currentBg?.type === 'image' && (
-                <img
-                  src={currentBg.value}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none'
-                  }}
-                />
-              )}
-
-              {/* Video element — visible unless blur-only mode */}
+              {/* Hidden video element - we render via canvas */}
               <video
                 ref={videoRef}
                 onLoadedMetadata={handleVideoLoaded}
-                className={`absolute inset-0 w-full h-full object-cover ${
-                  isBlurMode ? 'opacity-0' : ''
-                }`}
+                className="hidden"
                 playsInline
                 muted
               />
-
-              {/* Canvas for blur mode rendering */}
-              {isBlurMode && (
-                <canvas
-                  ref={canvasRef}
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
+              {/* Canvas for rendering the composited output */}
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+              {/* Model loading indicator */}
+              {modelLoading && (
+                <div className="absolute top-3 left-3 flex items-center gap-2 bg-stone-900/80 rounded-lg px-3 py-1.5">
+                  <div className="size-3 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-xs text-amber-300">Loading AI model...</span>
+                </div>
               )}
-
+              {/* Segmentation status */}
+              {cameraActive && !segmentationReady && !modelLoading && (
+                <div className="absolute top-3 left-3 flex items-center gap-2 bg-stone-900/80 rounded-lg px-3 py-1.5">
+                  <div className="size-3 rounded-full bg-stone-500" />
+                  <span className="text-xs text-stone-400">No AI segmentation</span>
+                </div>
+              )}
               {/* Capture flash effect */}
               {capturing && (
                 <div className="absolute inset-0 bg-white/80 animate-pulse pointer-events-none" />
               )}
             </>
           )}
-
-          {/* Hidden canvas for non-blur capture (always present) */}
-          {!isBlurMode && (
-            <canvas ref={canvasRef} className="hidden" />
-          )}
         </div>
 
         {/* ── Background Selector ─────────────────────────────────── */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium text-stone-400 uppercase tracking-wider">
-            <Palette className="size-3.5" />
-            <span>Virtual Background</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-medium text-stone-400 uppercase tracking-wider">
+              <Palette className="size-3.5" />
+              <span>Virtual Background</span>
+            </div>
+            {/* Upload button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1.5 text-stone-400 hover:text-stone-200 hover:bg-stone-800"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="size-3" />
+              Upload
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleCustomBgUpload}
+            />
           </div>
-          <div className="grid grid-cols-6 sm:grid-cols-7 md:grid-cols-13 gap-1.5">
-            {BACKGROUNDS.map((bg) => {
+
+          {/* Built-in backgrounds grid */}
+          <div className="grid grid-cols-6 sm:grid-cols-7 md:grid-cols-10 gap-1.5">
+            {allBackgrounds.map((bg) => {
               const isActive = selectedBg === bg.id
+              const isCustom = bg.type === 'custom'
               return (
-                <button
-                  key={bg.id}
-                  onClick={() => setSelectedBg(bg.id)}
-                  className={`
-                    relative group flex flex-col items-center gap-1 rounded-md p-1.5
-                    transition-all duration-150 cursor-pointer
-                    ${isActive
-                      ? 'ring-2 ring-teal-500 ring-offset-1 ring-offset-stone-900 bg-stone-800'
-                      : 'hover:bg-stone-800/60 bg-transparent'
-                    }
-                  `}
-                  title={bg.label}
-                  aria-label={`Select ${bg.label} background`}
-                  aria-pressed={isActive}
-                >
-                  <div
+                <div key={bg.id} className="relative group">
+                  <button
+                    onClick={() => setSelectedBg(bg.id)}
                     className={`
-                      size-8 rounded-md overflow-hidden flex items-center justify-center
-                      border border-stone-600/50
-                      ${bg.preview}
-                      ${bg.type === 'blur' ? 'relative' : ''}
+                      relative flex flex-col items-center gap-1 rounded-md p-1.5 w-full
+                      transition-all duration-150 cursor-pointer
+                      ${isActive
+                        ? 'ring-2 ring-teal-500 ring-offset-1 ring-offset-stone-900 bg-stone-800'
+                        : 'hover:bg-stone-800/60 bg-transparent'
+                      }
                     `}
+                    title={bg.label}
+                    aria-label={`Select ${bg.label} background`}
+                    aria-pressed={isActive}
                   >
-                    {bg.type === 'none' && (
-                      <CameraOff className="size-3.5 text-stone-300" />
-                    )}
-                    {bg.type === 'blur' && (
-                      <Sparkles className="size-3.5 text-stone-200" />
-                    )}
-                    {bg.type === 'image' && (
-                      <ImageIcon className="size-3.5 text-stone-200" />
-                    )}
-                  </div>
-                  <span className="text-[9px] leading-tight text-stone-500 group-hover:text-stone-300 truncate w-full text-center">
-                    {bg.label}
-                  </span>
-                </button>
+                    <div
+                      className={`
+                        size-8 rounded-md overflow-hidden flex items-center justify-center
+                        border border-stone-600/50
+                        ${bg.preview}
+                      `}
+                    >
+                      {bg.type === 'none' && (
+                        <CameraOff className="size-3.5 text-stone-300" />
+                      )}
+                      {bg.type === 'blur' && (
+                        <Sparkles className="size-3.5 text-stone-200" />
+                      )}
+                      {(bg.type === 'image' || bg.type === 'custom') && !isCustom && (
+                        <ImageIcon className="size-3.5 text-stone-200" />
+                      )}
+                      {/* Show thumbnail for custom backgrounds */}
+                      {isCustom && bg.value && (
+                        <img src={bg.value} alt="" className="absolute inset-0.5 size-7 object-cover rounded" />
+                      )}
+                    </div>
+                    <span className="text-[9px] leading-tight text-stone-500 group-hover:text-stone-300 truncate w-full text-center">
+                      {bg.label}
+                    </span>
+                  </button>
+                  {/* Remove button for custom backgrounds */}
+                  {isCustom && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeCustomBg(bg.id) }}
+                      className="absolute -top-1 -right-1 size-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label={`Remove ${bg.label}`}
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>
@@ -496,7 +607,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
             size="sm"
             onClick={takePhoto}
             disabled={!cameraActive || capturing}
-            className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white disabled:opacity-40"
+            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"
           >
             <Aperture className="size-4" />
             {capturing ? 'Capturing...' : 'Take Photo'}

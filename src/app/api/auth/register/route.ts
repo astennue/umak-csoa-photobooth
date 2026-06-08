@@ -2,11 +2,18 @@ import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-utils'
+import { getAuthContext } from '@/lib/auth'
+import { encrypt } from '@/lib/crypto'
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext()
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401)
+    }
+
     const body = await request.json()
-    const { email, password, name, role, organizationId, userRole, userOrgId } = body
+    const { email, password, name, role, organizationId } = body
 
     // Validate required fields
     if (!email || !password || !name || !role) {
@@ -19,20 +26,25 @@ export async function POST(request: NextRequest) {
       return errorResponse('Invalid role. Must be SUPER_ADMIN, ORG_ADMIN, or FACILITATOR')
     }
 
-    // RBAC: ORG_ADMIN can only create FACILITATOR accounts
-    if (userRole === 'ORG_ADMIN' && role !== 'FACILITATOR') {
-      return errorResponse('Organization Admins can only create Facilitator accounts', 403)
+    // RBAC: FACILITATOR cannot create any accounts
+    if (ctx.role === 'FACILITATOR') {
+      return errorResponse('Facilitators cannot create user accounts', 403)
     }
 
-    // RBAC: FACILITATOR cannot create any accounts
-    if (userRole === 'FACILITATOR') {
-      return errorResponse('Facilitators cannot create user accounts', 403)
+    // RBAC: ORG_ADMIN can only create FACILITATOR accounts
+    if (ctx.role === 'ORG_ADMIN' && role !== 'FACILITATOR') {
+      return errorResponse('Organization Admins can only create Facilitator accounts', 403)
     }
 
     // RBAC: ORG_ADMIN must assign to their own org
     let effectiveOrgId = organizationId
-    if (userRole === 'ORG_ADMIN' && userOrgId) {
-      effectiveOrgId = userOrgId
+    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+      effectiveOrgId = ctx.organizationId
+    }
+
+    // RBAC: ORG_ADMIN cannot create SUPER_ADMIN
+    if (ctx.role === 'ORG_ADMIN' && role === 'SUPER_ADMIN') {
+      return errorResponse('Organization Admins cannot create Super Admin accounts', 403)
     }
 
     // Check email uniqueness
@@ -41,14 +53,16 @@ export async function POST(request: NextRequest) {
       return errorResponse('Email already exists')
     }
 
-    // Hash password
+    // Hash password and encrypt plain password
     const hashedPassword = await bcrypt.hash(password, 12)
+    const encryptedPassword = encrypt(password)
 
     // Create user
     const user = await db.user.create({
       data: {
         email,
         password: hashedPassword,
+        plainPassword: encryptedPassword,
         name,
         role,
         organizationId: effectiveOrgId || null,

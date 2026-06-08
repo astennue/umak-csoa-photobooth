@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { format } from 'date-fns'
 import {
   Palette,
@@ -84,7 +84,6 @@ const emptyForm: TemplateFormData = {
 }
 
 export default function TemplatesPage() {
-  const { toast } = useToast()
   const queryClient = useQueryClient()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
@@ -155,12 +154,12 @@ export default function TemplatesPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast({ title: 'Template created', description: 'The template has been created successfully.' })
+      toast.success('Template created', { description: 'The template has been created successfully.' })
       setForm(emptyForm)
       setCreateOpen(false)
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -185,13 +184,13 @@ export default function TemplatesPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast({ title: 'Template updated', description: 'The template has been updated successfully.' })
+      toast.success('Template updated', { description: 'The template has been updated successfully.' })
       setForm(emptyForm)
       setEditOpen(false)
       setEditingTemplate(null)
     },
     onError: (err: Error) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      toast.error('Error', { description: err.message })
     },
   })
 
@@ -220,7 +219,7 @@ export default function TemplatesPage() {
 
   function handleSubmit(isEdit: boolean) {
     if (!form.eventId || !form.name.trim()) {
-      toast({ title: 'Validation Error', description: 'Event and Name are required.', variant: 'destructive' })
+      toast.error('Validation Error', { description: 'Event and Name are required.' })
       return
     }
     if (isEdit && editingTemplate) {
