@@ -53,6 +53,8 @@ interface AnalyticsData {
   activeEvents: number
   completedSessions: number
   waitingInQueue: number
+  activeQueueEntries: number
+  completedQueueEntries: number
   totalGallery: number
   totalDevices: number
   recentSessions: RecentSession[]
@@ -555,8 +557,8 @@ export default function DashboardPage() {
           <div>
             <QueueOverview
               waiting={analytics?.waitingInQueue ?? 0}
-              active={analytics?.activeEvents ?? 0}
-              completed={analytics?.completedSessions ?? 0}
+              active={analytics?.activeQueueEntries ?? 0}
+              completed={analytics?.completedQueueEntries ?? 0}
             />
           </div>
         </div>

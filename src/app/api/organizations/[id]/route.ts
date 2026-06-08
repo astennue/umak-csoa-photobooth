@@ -1,12 +1,18 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { getAuthContext, isSuperAdmin, canAccessOrg } from '@/lib/auth';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const org = await db.organization.findUnique({
       where: { id },
@@ -15,6 +21,11 @@ export async function GET(
 
     if (!org) {
       return errorResponse('Organization not found', 404);
+    }
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only view their own org
+    if (!canAccessOrg(ctx, org.id)) {
+      return errorResponse('You can only view your own organization', 403);
     }
 
     return successResponse(org);
@@ -28,12 +39,16 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const body = await request.json();
-    const { userRole, ...updateData } = body;
 
     // RBAC: Only SUPER_ADMIN can edit organizations
-    if (userRole && userRole !== 'SUPER_ADMIN') {
+    if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can edit organizations', 403);
     }
 
@@ -42,7 +57,7 @@ export async function PUT(
       return errorResponse('Organization not found', 404);
     }
 
-    const { name, description, logoUrl, email, phone, active } = updateData;
+    const { name, description, logoUrl, email, phone, active } = body;
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       return errorResponse('Name must be a non-empty string', 400);
     }
@@ -73,12 +88,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
 
-    // RBAC: Check user role from query params
-    const searchParams = new URL(request.url).searchParams;
-    const userRole = searchParams.get('userRole') || '';
-    if (userRole && userRole !== 'SUPER_ADMIN') {
+    // RBAC: Only SUPER_ADMIN can delete organizations
+    if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can delete organizations', 403);
     }
 

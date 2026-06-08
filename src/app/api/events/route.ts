@@ -1,17 +1,20 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { applyOrgFilter } from '@/lib/auth';
+import { getAuthContext, applyOrgFilter } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { page, limit, skip } = paginateRequest(request);
     const searchParams = getSearchParams(request);
     const organizationId = searchParams.get('organizationId') || '';
     const status = searchParams.get('status') || '';
     const search = searchParams.get('search') || '';
-    const userRole = searchParams.get('userRole') || '';
-    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (organizationId) where.organizationId = organizationId;
@@ -25,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Apply RBAC: ORG_ADMIN and FACILITATOR can only see their own org's events
-    applyOrgFilter(where, userRole, userOrgId);
+    applyOrgFilter(where, ctx.role || '', ctx.organizationId || '');
 
     const [items, total] = await Promise.all([
       db.event.findMany({
@@ -49,8 +52,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const body = await request.json();
-    const { name, description, organizationId, location, startDate, endDate, status, maxSessions, userRole, userOrgId } = body;
+    const { name, description, organizationId, location, startDate, endDate, status, maxSessions } = body;
 
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return errorResponse('Name is required and must be a non-empty string', 400);
@@ -59,11 +67,11 @@ export async function POST(request: NextRequest) {
     // Determine the effective organizationId
     let effectiveOrgId = organizationId;
     // RBAC: ORG_ADMIN and FACILITATOR can only create events for their own org
-    if (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') {
-      if (!userOrgId) {
+    if (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR') {
+      if (!ctx.organizationId) {
         return errorResponse('You are not assigned to an organization', 403);
       }
-      effectiveOrgId = userOrgId;
+      effectiveOrgId = ctx.organizationId;
     }
 
     if (!effectiveOrgId || typeof effectiveOrgId !== 'string' || effectiveOrgId.trim() === '') {

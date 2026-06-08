@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { getAuthContext, canAccessOrg } from '@/lib/auth';
 
 const VALID_STATUSES = ['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
 const STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -16,6 +17,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const event = await db.event.findUnique({
       where: { id },
@@ -29,6 +35,11 @@ export async function GET(
       return errorResponse('Event not found', 404);
     }
 
+    // RBAC: ORG_ADMIN and FACILITATOR can only view events in their own org
+    if (!canAccessOrg(ctx, event.organizationId)) {
+      return errorResponse('You can only view events in your organization', 403);
+    }
+
     return successResponse(event);
   } catch (err: any) {
     return errorResponse(err.message, 500);
@@ -40,9 +51,14 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const body = await request.json();
-    const { userRole, userOrgId, ...updateData } = body;
+    const { ...updateData } = body;
 
     const existing = await db.event.findUnique({ where: { id } });
     if (!existing) {
@@ -50,10 +66,8 @@ export async function PUT(
     }
 
     // RBAC: ORG_ADMIN and FACILITATOR can only edit events in their org
-    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
-      if (existing.organizationId !== userOrgId) {
-        return errorResponse('You can only edit events in your organization', 403);
-      }
+    if (!canAccessOrg(ctx, existing.organizationId)) {
+      return errorResponse('You can only edit events in your organization', 403);
     }
 
     const { name, description, location, startDate, endDate, status, maxSessions } = updateData;

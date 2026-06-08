@@ -34,6 +34,8 @@ import {
   UserCog,
   LogOut,
   ChevronDown,
+  Radio,
+  Camera,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
@@ -60,10 +62,14 @@ import DevicesPage from '@/components/devices'
 import AuditLogPage from '@/components/audit-log'
 import UsersPage from '@/components/users'
 import LoginPage from '@/components/login-page'
+import LiveDisplayPage from '@/components/live-display'
+import VirtualBackgroundPage from '@/components/virtual-background'
 
 function getNavItems(role?: string): { page: Page; label: string; icon: React.ComponentType<{ className?: string }>; adminOnly?: boolean }[] {
   const items = [
     { page: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
+    { page: 'live-display' as Page, label: 'Live Display', icon: Radio },
+    { page: 'virtual-background' as Page, label: 'Virtual BG', icon: Camera },
     { page: 'organizations' as Page, label: 'Organizations', icon: Building2 },
     { page: 'events' as Page, label: 'Events', icon: Calendar },
     { page: 'sessions' as Page, label: 'Sessions', icon: Users },
@@ -287,6 +293,8 @@ function PageContent() {
 
   const pages: Record<Page, React.ComponentType> = {
     dashboard: DashboardPage,
+    'live-display': LiveDisplayPage,
+    'virtual-background': VirtualBackgroundPage,
     organizations: OrganizationsPage,
     events: EventsPage,
     sessions: SessionsPage,
@@ -322,7 +330,7 @@ function PageContent() {
         <footer className="border-t border-emerald-100/30 dark:border-emerald-900/20 py-4 px-4 md:px-6">
           <p className="text-xs text-muted-foreground text-center">
             <span className="text-emerald-600 dark:text-emerald-400">&copy;</span>{' '}
-            2025 UMak CSOA &mdash; Center for Student Organization and Activities. University of Makati.
+            {new Date().getFullYear()} UMak CSOA &mdash; Center for Student Organization and Activities. University of Makati.
           </p>
         </footer>
       </div>

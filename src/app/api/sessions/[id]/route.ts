@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { getAuthContext, canAccessOrg } from '@/lib/auth';
 
 const VALID_STATUSES = ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 const STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -15,6 +16,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const session = await db.session.findUnique({
       where: { id },
@@ -28,6 +34,11 @@ export async function GET(
       return errorResponse('Session not found', 404);
     }
 
+    // RBAC: ORG_ADMIN and FACILITATOR can only view sessions in their org
+    if (!canAccessOrg(ctx, session.event.organizationId)) {
+      return errorResponse('You can only view sessions in your organization', 403);
+    }
+
     return successResponse(session);
   } catch (err: any) {
     return errorResponse(err.message, 500);
@@ -39,13 +50,24 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const body = await request.json();
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
 
-    const existing = await db.session.findUnique({ where: { id } });
+    const { id } = await params;
+
+    const existing = await db.session.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
     if (!existing) {
       return errorResponse('Session not found', 404);
     }
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only edit sessions in their org
+    if (!canAccessOrg(ctx, existing.event.organizationId)) {
+      return errorResponse('You can only edit sessions in your organization', 403);
+    }
+
+    const body = await request.json();
 
     const { guestName, guestEmail, guestPhone, status, notes } = body;
 
@@ -90,6 +112,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { id } = await params;
     const body = await request.json();
     const { status } = body;
@@ -98,9 +125,14 @@ export async function PATCH(
       return errorResponse('Status is required for PATCH', 400);
     }
 
-    const existing = await db.session.findUnique({ where: { id } });
+    const existing = await db.session.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
     if (!existing) {
       return errorResponse('Session not found', 404);
+    }
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only update sessions in their org
+    if (!canAccessOrg(ctx, existing.event.organizationId)) {
+      return errorResponse('You can only update sessions in your organization', 403);
     }
 
     if (!VALID_STATUSES.includes(status)) {

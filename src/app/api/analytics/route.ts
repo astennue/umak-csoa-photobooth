@@ -1,23 +1,28 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { getAuthContext } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const searchParams = new URL(request.url).searchParams;
     const organizationId = searchParams.get('organizationId') || '';
     const eventId = searchParams.get('eventId') || '';
-    const userRole = searchParams.get('userRole') || '';
-    const userOrgId = searchParams.get('userOrgId') || '';
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see analytics for their own org
-    const effectiveOrgId = (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') ? userOrgId : organizationId;
+    const effectiveOrgId = (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR')
+      ? ctx.organizationId
+      : organizationId;
 
     const eventWhere: any = {};
     if (effectiveOrgId) eventWhere.organizationId = effectiveOrgId;
     if (eventId) eventWhere.id = eventId;
 
-    // Session and queue filters that respect org scope
     const sessionEventWhere: any = {};
     if (effectiveOrgId) sessionEventWhere.organizationId = effectiveOrgId;
 
@@ -29,12 +34,13 @@ export async function GET(request: NextRequest) {
       activeEvents,
       completedSessions,
       waitingInQueue,
+      activeQueueEntries,
+      completedQueueEntries,
       totalGallery,
       totalDevices,
     ] = await Promise.all([
-      // SUPER_ADMIN sees all orgs, others only see their own
-      (userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR')
-        ? db.organization.count({ where: { id: effectiveOrgId } })
+      (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR')
+        ? db.organization.count({ where: { id: effectiveOrgId || 'none' } })
         : db.organization.count(),
       db.event.count({ where: eventWhere }),
       db.session.count({
@@ -58,6 +64,20 @@ export async function GET(request: NextRequest) {
       db.queueEntry.count({
         where: {
           status: 'WAITING',
+          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
+          ...(eventId ? { eventId } : {}),
+        },
+      }),
+      db.queueEntry.count({
+        where: {
+          status: 'ACTIVE',
+          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
+          ...(eventId ? { eventId } : {}),
+        },
+      }),
+      db.queueEntry.count({
+        where: {
+          status: 'COMPLETED',
           ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
           ...(eventId ? { eventId } : {}),
         },
@@ -91,6 +111,8 @@ export async function GET(request: NextRequest) {
       activeEvents,
       completedSessions,
       waitingInQueue,
+      activeQueueEntries,
+      completedQueueEntries,
       totalGallery,
       totalDevices,
       recentSessions,

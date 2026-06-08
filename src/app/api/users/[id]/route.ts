@@ -2,12 +2,18 @@ import { db } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-utils'
 import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
+import { getAuthContext, canAccessOrg } from '@/lib/auth'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext()
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401)
+    }
+
     const { id } = await params
     const user = await db.user.findUnique({
       where: { id },
@@ -30,6 +36,11 @@ export async function GET(
       return errorResponse('User not found', 404)
     }
 
+    // RBAC: ORG_ADMIN and FACILITATOR can only view users in their own org
+    if (!canAccessOrg(ctx, user.organizationId)) {
+      return errorResponse('You can only view users in your organization', 403)
+    }
+
     return successResponse(user)
   } catch (err: any) {
     return errorResponse(err.message, 500)
@@ -41,9 +52,14 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext()
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401)
+    }
+
     const { id } = await params
     const body = await request.json()
-    const { name, email, role, organizationId, active, password, userRole, userOrgId } = body
+    const { name, email, role, organizationId, active, password } = body
 
     const existing = await db.user.findUnique({ where: { id } })
     if (!existing) {
@@ -51,11 +67,11 @@ export async function PUT(
     }
 
     // RBAC: ORG_ADMIN can only edit FACILITATOR accounts in their own org
-    if (userRole === 'ORG_ADMIN' && userOrgId) {
+    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
       if (existing.role !== 'FACILITATOR') {
         return errorResponse('You can only edit Facilitator accounts', 403)
       }
-      if (existing.organizationId !== userOrgId) {
+      if (existing.organizationId !== ctx.organizationId) {
         return errorResponse('You can only edit users in your organization', 403)
       }
       // Cannot change role away from FACILITATOR
@@ -65,7 +81,7 @@ export async function PUT(
     }
 
     // RBAC: FACILITATOR cannot edit any accounts
-    if (userRole === 'FACILITATOR') {
+    if (ctx.role === 'FACILITATOR') {
       return errorResponse('Facilitators cannot edit user accounts', 403)
     }
 
@@ -83,8 +99,8 @@ export async function PUT(
     if (role !== undefined) data.role = role
     if (organizationId !== undefined) {
       // ORG_ADMIN must keep users in their own org
-      if (userRole === 'ORG_ADMIN' && userOrgId) {
-        data.organizationId = userOrgId
+      if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+        data.organizationId = ctx.organizationId
       } else {
         data.organizationId = organizationId || null
       }
@@ -120,15 +136,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getAuthContext()
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401)
+    }
+
     const { id } = await params
 
-    // RBAC: Check via query params
-    const searchParams = new URL(request.url).searchParams
-    const userRole = searchParams.get('userRole') || ''
-    const userOrgId = searchParams.get('userOrgId') || ''
-
     // FACILITATOR cannot delete users
-    if (userRole === 'FACILITATOR') {
+    if (ctx.role === 'FACILITATOR') {
       return errorResponse('Facilitators cannot delete user accounts', 403)
     }
 
@@ -138,11 +154,11 @@ export async function DELETE(
     }
 
     // ORG_ADMIN can only delete FACILITATOR accounts in their own org
-    if (userRole === 'ORG_ADMIN' && userOrgId) {
+    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
       if (existing.role !== 'FACILITATOR') {
         return errorResponse('You can only delete Facilitator accounts', 403)
       }
-      if (existing.organizationId !== userOrgId) {
+      if (existing.organizationId !== ctx.organizationId) {
         return errorResponse('You can only delete users in your organization', 403)
       }
     }

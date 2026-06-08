@@ -1,23 +1,26 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { applyEventOrgFilter } from '@/lib/auth';
+import { getAuthContext, applyEventOrgFilter, canAccessOrg } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { page, limit, skip } = paginateRequest(request);
     const searchParams = getSearchParams(request);
     const eventId = searchParams.get('eventId') || '';
     const sessionId = searchParams.get('sessionId') || '';
-    const userRole = searchParams.get('userRole') || '';
-    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (eventId) where.eventId = eventId;
     if (sessionId) where.sessionId = sessionId;
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see gallery for their org's events
-    applyEventOrgFilter(where, userRole, userOrgId);
+    applyEventOrgFilter(where, ctx.role || '', ctx.organizationId || '');
 
     const [items, total] = await Promise.all([
       db.gallery.findMany({
@@ -41,8 +44,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const body = await request.json();
-    const { eventId, sessionId, photoUrl, thumbnailUrl, caption, isPublic, isFavorite, userRole, userOrgId } = body;
+    const { eventId, sessionId, photoUrl, thumbnailUrl, caption, isPublic, isFavorite } = body;
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
@@ -57,10 +65,8 @@ export async function POST(request: NextRequest) {
     }
 
     // RBAC: ORG_ADMIN and FACILITATOR can only upload to their org's events
-    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
-      if (event.organizationId !== userOrgId) {
-        return errorResponse('You can only upload photos for events in your organization', 403);
-      }
+    if (!canAccessOrg(ctx, event.organizationId)) {
+      return errorResponse('You can only upload photos for events in your organization', 403);
     }
 
     if (sessionId) {

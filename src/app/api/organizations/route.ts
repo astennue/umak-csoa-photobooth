@@ -1,14 +1,18 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
+import { getAuthContext, isSuperAdmin } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const { page, limit, skip } = paginateRequest(request);
     const searchParams = getSearchParams(request);
     const search = searchParams.get('search') || '';
-    const userRole = searchParams.get('userRole') || '';
-    const userOrgId = searchParams.get('userOrgId') || '';
 
     const where: any = {};
     if (search) {
@@ -20,8 +24,8 @@ export async function GET(request: NextRequest) {
     }
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see their own organization
-    if ((userRole === 'ORG_ADMIN' || userRole === 'FACILITATOR') && userOrgId) {
-      where.id = userOrgId;
+    if (!isSuperAdmin(ctx) && ctx.organizationId) {
+      where.id = ctx.organizationId;
     }
 
     const [items, total] = await Promise.all([
@@ -43,11 +47,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
     const body = await request.json();
-    const { name, description, logoUrl, email, phone, active, userRole } = body;
+    const { name, description, logoUrl, email, phone, active } = body;
 
     // RBAC: Only SUPER_ADMIN can create organizations
-    if (userRole && userRole !== 'SUPER_ADMIN') {
+    if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can create organizations', 403);
     }
 
