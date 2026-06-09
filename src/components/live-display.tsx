@@ -502,6 +502,23 @@ export default function LiveDisplay() {
         }
 
         setCameraActive(true)
+
+        // Safety: if onLoadedMetadata doesn't fire within 3s, force videoReady
+        setTimeout(() => {
+          setVideoReady((prev) => {
+            if (!prev && videoRef.current && videoRef.current.readyState >= 2) {
+              const vw = videoRef.current.videoWidth || DEFAULT_VIDEO_WIDTH
+              const vh = videoRef.current.videoHeight || DEFAULT_VIDEO_HEIGHT
+              if (canvasRef.current) {
+                canvasRef.current.width = vw
+                canvasRef.current.height = vh
+              }
+              canvasSizeRef.current = { w: vw, h: vh }
+              return true
+            }
+            return prev
+          })
+        }, 3000)
       } else {
         setCameraActive(true)
       }
@@ -751,18 +768,19 @@ export default function LiveDisplay() {
           </div>
         ) : (
           <>
-            {/* Hidden video source */}
+            {/* Video source — visible as fallback until canvas renders */}
             <video
               ref={videoRef}
               onLoadedMetadata={handleVideoLoaded}
-              className="hidden"
+              className={`absolute inset-0 w-full h-full object-contain ${showCanvas ? 'invisible' : ''}`}
+              style={{ transform: mirrorVideo ? 'scaleX(-1)' : 'none' }}
               playsInline
               muted
             />
-            {/* Canvas output — fills entire area */}
+            {/* Canvas output — fills entire area, on top of video */}
             <canvas
               ref={canvasRef}
-              className="absolute inset-0 w-full h-full object-contain"
+              className={`absolute inset-0 w-full h-full object-contain ${showCanvas ? '' : 'opacity-0'}`}
             />
 
             {/* Countdown overlay */}
