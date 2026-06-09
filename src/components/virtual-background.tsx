@@ -88,6 +88,11 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const [segmentationError, setSegmentationError] = useState<string | null>(null)
   const [videoReady, setVideoReady] = useState(false)
 
+  const allBackgrounds = useMemo(
+    () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
+    [customBackgrounds]
+  )
+
   // ── Refs ──────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
