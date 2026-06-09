@@ -47,6 +47,11 @@ export async function POST(request: NextRequest) {
       return errorResponse('Organization Admins cannot create Super Admin accounts', 403)
     }
 
+    // SUPER_ADMIN creating ORG_ADMIN must specify organization
+    if (ctx.role === 'SUPER_ADMIN' && role === 'ORG_ADMIN' && !organizationId) {
+      return errorResponse('Organization is required when creating an Org Admin account')
+    }
+
     // Check email uniqueness
     const existingUser = await db.user.findUnique({ where: { email } })
     if (existingUser) {

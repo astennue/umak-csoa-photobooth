@@ -63,24 +63,28 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* ── LEFT PANEL: Branding ── */}
-      <div className="relative flex flex-col justify-between bg-stone-900 p-8 lg:w-[52%] lg:p-14 xl:p-20 overflow-hidden">
-        {/* Very subtle grid pattern */}
+      <div className="relative flex flex-col justify-between bg-slate-900 p-8 lg:w-[52%] lg:p-14 xl:p-20 overflow-hidden">
+        {/* Subtle dot grid pattern */}
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.03]"
+          className="pointer-events-none absolute inset-0 opacity-[0.04]"
           style={{
-            backgroundImage: 'radial-gradient(circle, #d6d3d1 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
+            backgroundImage:
+              'radial-gradient(circle, #e2e8f0 0.8px, transparent 0.8px)',
+            backgroundSize: '24px 24px',
           }}
         />
-        
-        {/* Subtle accent line on left edge */}
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-teal-600 via-teal-700 to-stone-900" />
+
+        {/* Thin accent line at top */}
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-500/60 to-transparent" />
+
+        {/* Soft ambient glow behind logo */}
+        <div className="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-emerald-500/[0.03] blur-3xl" />
 
         {/* Main content */}
         <div className="relative z-10 flex-1 flex flex-col justify-center">
-          {/* Logo with subtle glow */}
+          {/* Logo with gentle pulse */}
           <div className="mb-10">
-            <div className="relative w-20 h-20 lg:w-24 lg:h-24 rounded-2xl overflow-hidden bg-white shadow-xl ring-1 ring-black/5 p-2">
+            <div className="relative w-20 h-20 lg:w-24 lg:h-24 rounded-2xl overflow-hidden bg-white shadow-2xl ring-1 ring-white/10 p-2.5 animate-[subtle-pulse_4s_ease-in-out_infinite]">
               <Image
                 src="/umak-csoa-logo.png"
                 alt="UMak CSOA Logo"
@@ -92,35 +96,35 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* System name - bold and confident */}
-          <div className="space-y-3">
-            <h1 className="text-4xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight text-white">
+          {/* System name */}
+          <div className="space-y-4">
+            <h1 className="text-4xl lg:text-5xl xl:text-6xl font-extrabold tracking-tight text-white leading-[1.1]">
               UMak CSOA
             </h1>
             <div className="flex items-center gap-3">
-              <div className="h-1 w-10 bg-teal-600 rounded-full" />
-              <p className="text-lg lg:text-xl font-semibold text-teal-400">
+              <div className="h-[2px] w-8 bg-emerald-500 rounded-full" />
+              <p className="text-base lg:text-lg font-semibold text-emerald-400/90">
                 Photobooth Management System
               </p>
             </div>
-            <p className="text-sm lg:text-base text-stone-400 max-w-md">
-              Center for Student Organization &amp; Activities
+            <p className="text-sm text-slate-500 max-w-sm leading-relaxed">
+              Center for Student Organization &amp; Activities — Streamlining event photobooth operations for the entire university.
             </p>
           </div>
 
           {/* Divider */}
-          <div className="my-10 h-px w-full max-w-xs bg-stone-800" />
+          <div className="my-10 h-px w-full max-w-xs bg-slate-800" />
 
-          {/* Feature highlights - clean list style */}
-          <ul className="space-y-5">
+          {/* Feature highlights */}
+          <ul className="space-y-4">
             {features.map((feature) => (
-              <li key={feature.label} className="flex items-start gap-4">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-stone-800 ring-1 ring-stone-700/50">
-                  <feature.icon className="h-4 w-4 text-teal-400" />
+              <li key={feature.label} className="flex items-start gap-3.5">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-800/80 ring-1 ring-slate-700/50">
+                  <feature.icon className="h-3.5 w-3.5 text-emerald-400/80" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-stone-200">{feature.label}</p>
-                  <p className="text-xs text-stone-500 mt-0.5">{feature.description}</p>
+                  <p className="text-sm font-medium text-slate-300">{feature.label}</p>
+                  <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">{feature.description}</p>
                 </div>
               </li>
             ))}
@@ -128,10 +132,10 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <div className="relative z-10 mt-10 pt-6 border-t border-stone-800/80">
+        <div className="relative z-10 mt-10 pt-6 border-t border-slate-800/60">
           <div className="flex items-center gap-2">
-            <Shield className="h-3.5 w-3.5 text-stone-600" />
-            <p className="text-xs text-stone-600">
+            <Shield className="h-3 w-3 text-slate-700" />
+            <p className="text-xs text-slate-700">
               University of Makati &middot; Center for Student Organization &amp; Activities
             </p>
           </div>
@@ -139,11 +143,11 @@ export default function LoginPage() {
       </div>
 
       {/* ── RIGHT PANEL: Login Form ── */}
-      <div className="flex flex-1 flex-col justify-center bg-stone-50 p-8 lg:p-14 xl:p-20 border-l border-stone-200">
+      <div className="flex flex-1 flex-col justify-center bg-white p-8 lg:p-14 xl:p-20 border-l border-slate-100">
         <div className="mx-auto w-full max-w-sm">
           {/* Mobile logo (visible on small screens only) */}
           <div className="mb-8 lg:hidden flex items-center gap-3">
-            <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-white shadow ring-1 ring-black/5 p-0.5">
+            <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-slate-50 shadow-sm ring-1 ring-slate-200/80 p-0.5">
               <Image
                 src="/umak-csoa-logo.png"
                 alt="UMak CSOA"
@@ -154,15 +158,17 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <p className="text-sm font-bold text-stone-800">UMak CSOA</p>
-              <p className="text-[10px] text-stone-500">Photobooth Manager</p>
+              <p className="text-sm font-bold text-slate-800">UMak CSOA</p>
+              <p className="text-[10px] text-slate-400">Photobooth Manager</p>
             </div>
           </div>
 
           {/* Sign In header */}
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-stone-900">Welcome back</h2>
-            <p className="mt-1.5 text-sm text-stone-500">
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Welcome back
+            </h2>
+            <p className="mt-1.5 text-sm text-slate-400 leading-relaxed">
               Sign in to access the photobooth management system
             </p>
           </div>
@@ -170,14 +176,17 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Error message */}
             {error && (
-              <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-                {error}
+              <div className="rounded-lg bg-red-50 border border-red-100 p-3.5 text-sm text-red-600">
+                <span className="font-medium">Sign in failed.</span> {error}
               </div>
             )}
 
             {/* Email */}
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm font-medium text-stone-700">
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="email"
+                className="text-sm font-medium text-slate-600"
+              >
                 Email Address
               </Label>
               <Input
@@ -188,14 +197,17 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
-                className="h-11 rounded-lg bg-white border-stone-300 text-stone-900 placeholder:text-stone-400 focus:border-teal-600 focus:ring-teal-600/20"
+                className="h-11 rounded-lg border-slate-200 text-slate-900 placeholder:text-slate-300 focus:border-emerald-500 focus:ring-emerald-500/20 bg-white"
                 autoComplete="email"
               />
             </div>
 
             {/* Password */}
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium text-stone-700">
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="password"
+                className="text-sm font-medium text-slate-600"
+              >
                 Password
               </Label>
               <div className="relative">
@@ -207,14 +219,14 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   disabled={loading}
-                  className="h-11 pr-10 rounded-lg bg-white border-stone-300 text-stone-900 placeholder:text-stone-400 focus:border-teal-600 focus:ring-teal-600/20"
+                  className="h-11 pr-10 rounded-lg border-slate-200 text-slate-900 placeholder:text-slate-300 focus:border-emerald-500 focus:ring-emerald-500/20 bg-white"
                   autoComplete="current-password"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 size-8 text-stone-400 hover:text-stone-600 hover:bg-transparent"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 size-8 text-slate-300 hover:text-slate-500 hover:bg-transparent"
                   onClick={() => setShowPassword(!showPassword)}
                   tabIndex={-1}
                 >
@@ -230,12 +242,12 @@ export default function LoginPage() {
             {/* Submit */}
             <Button
               type="submit"
-              className="w-full h-11 text-white font-semibold text-base rounded-lg bg-teal-700 hover:bg-teal-600 focus:ring-teal-500/50 border-0 mt-2 shadow-sm"
+              className="w-full h-11 text-white font-semibold text-sm rounded-lg bg-slate-900 hover:bg-slate-800 focus:ring-slate-900/30 border-0 mt-2 shadow-sm transition-colors"
               disabled={loading}
             >
               {loading ? (
                 <>
-                  <Loader2 className="size-5 mr-2 animate-spin" />
+                  <Loader2 className="size-4 mr-2 animate-spin" />
                   Signing in...
                 </>
               ) : (
@@ -245,13 +257,21 @@ export default function LoginPage() {
           </form>
 
           {/* Bottom text */}
-          <div className="mt-8 pt-6 border-t border-stone-200">
-            <p className="text-center text-xs text-stone-400">
+          <div className="mt-10 pt-6 border-t border-slate-100">
+            <p className="text-center text-xs text-slate-300">
               University of Makati &copy; {new Date().getFullYear()}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Global keyframes for subtle animations */}
+      <style jsx global>{`
+        @keyframes subtle-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.02); }
+        }
+      `}</style>
     </div>
   )
 }

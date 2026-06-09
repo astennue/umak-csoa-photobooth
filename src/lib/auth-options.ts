@@ -2,6 +2,7 @@ import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
+import { ensureSeeded } from '@/lib/seed'
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -13,6 +14,13 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null
+
+        // Auto-seed Super Admin accounts if database is empty
+        try {
+          await ensureSeeded()
+        } catch {
+          // Non-blocking: if seeding fails, continue with login attempt
+        }
 
         const user = await db.user.findUnique({
           where: { email: credentials.email },

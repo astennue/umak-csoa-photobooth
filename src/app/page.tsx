@@ -65,26 +65,26 @@ import LoginPage from '@/components/login-page'
 import LiveDisplayPage from '@/components/live-display'
 import VirtualBackgroundPage from '@/components/virtual-background'
 
-function getNavItems(role?: string): { page: Page; label: string; icon: React.ComponentType<{ className?: string }>; adminOnly?: boolean }[] {
-  const items = [
-    { page: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
-    { page: 'live-display' as Page, label: 'Live Display', icon: Radio },
-    { page: 'virtual-background' as Page, label: 'Virtual BG', icon: Camera },
-    { page: 'organizations' as Page, label: 'Organizations', icon: Building2 },
-    { page: 'events' as Page, label: 'Events', icon: Calendar },
-    { page: 'sessions' as Page, label: 'Sessions', icon: Users },
-    { page: 'queue' as Page, label: 'Queue', icon: ListOrdered },
-    { page: 'gallery' as Page, label: 'Gallery', icon: ImageIcon },
-    { page: 'templates' as Page, label: 'Templates', icon: Palette },
-    { page: 'devices' as Page, label: 'Devices', icon: Monitor },
-    { page: 'audit' as Page, label: 'Audit Log', icon: ScrollText },
-    { page: 'users' as Page, label: 'Users', icon: UserCog, adminOnly: true },
+type NavItem = { page: Page; label: string; icon: React.ComponentType<{ className?: string }> }
+
+function getNavItems(role?: string): NavItem[] {
+  const allItems: (NavItem & { roles: string[] })[] = [
+    { page: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'live-display', label: 'Live Display', icon: Radio, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'virtual-background', label: 'Virtual BG', icon: Camera, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'organizations', label: 'Organizations', icon: Building2, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+    { page: 'events', label: 'Events', icon: Calendar, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'sessions', label: 'Sessions', icon: Users, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'queue', label: 'Queue', icon: ListOrdered, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'gallery', label: 'Gallery', icon: ImageIcon, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
+    { page: 'templates', label: 'Templates', icon: Palette, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+    { page: 'devices', label: 'Devices', icon: Monitor, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+    { page: 'audit', label: 'Audit Log', icon: ScrollText, roles: ['SUPER_ADMIN'] },
+    { page: 'users', label: 'Users', icon: UserCog, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
   ]
 
-  if (role === 'SUPER_ADMIN' || role === 'ORG_ADMIN') {
-    return items
-  }
-  return items.filter((item) => !item.adminOnly)
+  if (!role) return allItems.filter((item) => item.roles.includes('FACILITATOR')).map(({ roles, ...rest }) => rest)
+  return allItems.filter((item) => item.roles.includes(role)).map(({ roles, ...rest }) => rest)
 }
 
 function getRoleBadgeColor(role: string) {

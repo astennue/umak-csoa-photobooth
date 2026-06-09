@@ -107,6 +107,11 @@ export async function PUT(
       return errorResponse('Facilitators cannot edit user accounts', 403)
     }
 
+    // SUPER_ADMIN changing role to ORG_ADMIN must specify organization
+    if (ctx.role === 'SUPER_ADMIN' && role === 'ORG_ADMIN' && !organizationId) {
+      return errorResponse('Organization is required for Org Admin role')
+    }
+
     // Check email uniqueness if email is being changed
     if (email && email !== existing.email) {
       const emailTaken = await db.user.findUnique({ where: { email } })

@@ -1,7 +1,18 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Camera, CameraOff, ImageIcon, Palette, Sparkles, Aperture, Upload, X } from 'lucide-react'
+import {
+  Camera,
+  CameraOff,
+  ImageIcon,
+  Palette,
+  Sparkles,
+  Aperture,
+  Upload,
+  X,
+  AlertCircle,
+  Loader2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -61,6 +72,10 @@ interface VirtualBackgroundProps {
   onCapture?: (imageDataUrl: string) => void
 }
 
+// ── Default canvas dimensions (will be updated when video loads) ────
+const DEFAULT_VIDEO_WIDTH = 1280
+const DEFAULT_VIDEO_HEIGHT = 720
+
 export default function VirtualBackground({ onCapture }: VirtualBackgroundProps) {
   // ── State ─────────────────────────────────────────────────────────
   const [cameraActive, setCameraActive] = useState(false)
@@ -70,65 +85,81 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const [customBackgrounds, setCustomBackgrounds] = useState<BackgroundOption[]>([])
   const [modelLoading, setModelLoading] = useState(false)
   const [segmentationReady, setSegmentationReady] = useState(false)
+  const [segmentationError, setSegmentationError] = useState<string | null>(null)
+  const [videoReady, setVideoReady] = useState(false)
 
   // ── Refs ──────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const personCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const bgImageRef = useRef<HTMLImageElement | null>(null)
   const animFrameRef = useRef<number>(0)
-  const segmentationRef = useRef<any>(null)
-  const latestResultsRef = useRef<any>(null)
+  const segmenterRef = useRef<any>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const lastSegmentTimeRef = useRef<number>(0)
+  const cameraActiveRef = useRef<boolean>(false)
+  const canvasSizeRef = useRef<{ w: number; h: number }>({ w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT })
 
   // All backgrounds (built-in + custom)
   const allBackgrounds = [...BUILT_IN_BACKGROUNDS, ...customBackgrounds]
 
-  // ── Initialize MediaPipe Selfie Segmentation ──────────────────────
+  // ── Keep cameraActiveRef in sync ─────────────────────────────────
   useEffect(() => {
-    let mounted = true
+    cameraActiveRef.current = cameraActive
+  }, [cameraActive])
+
+  // ── Initialize MediaPipe Tasks Vision (ImageSegmenter) ─────────
+  useEffect(() => {
+    let cancelled = false
 
     async function initSegmentation() {
       try {
         setModelLoading(true)
-        // Dynamic import to avoid SSR issues
-        const { SelfieSegmentation } = await import('@mediapipe/selfie_segmentation')
+        setSegmentationError(null)
 
-        if (!mounted) return
+        // Dynamic import of the MediaPipe Tasks Vision API
+        const visionModule = await import('@mediapipe/tasks-vision')
+        const { FilesetResolver, ImageSegmenter } = visionModule
 
-        const segmentation = new SelfieSegmentation({
-          locateFile: (file: string) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+        if (cancelled) return
+
+        // Resolve the WASM files from CDN
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
+        )
+
+        if (cancelled) return
+
+        // Create the image segmenter with selfie segmentation model
+        const segmenter = await ImageSegmenter.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+            delegate: 'GPU',
           },
+          runningMode: 'VIDEO',
+          outputCategoryMask: true,
+          outputConfidenceMasks: false,
         })
 
-        segmentation.setOptions({
-          modelSelection: 1, // 1 = general model (better quality), 0 = landscape model
-          selfieMode: true,
-        })
-
-        segmentation.onResults((results: any) => {
-          latestResultsRef.current = results
-        })
-
-        segmentationRef.current = segmentation
-
-        // Initialize the model by sending a blank frame
-        const tempCanvas = document.createElement('canvas')
-        tempCanvas.width = 1
-        tempCanvas.height = 1
-        await segmentation.send({ image: tempCanvas })
-
-        if (mounted) {
-          setSegmentationReady(true)
-          setModelLoading(false)
+        if (cancelled) {
+          segmenter.close()
+          return
         }
+
+        segmenterRef.current = segmenter
+        setSegmentationReady(true)
+        setModelLoading(false)
       } catch (err) {
-        console.error('Failed to initialize selfie segmentation:', err)
-        if (mounted) {
+        console.warn('Failed to initialize selfie segmentation:', err)
+        if (!cancelled) {
           setModelLoading(false)
-          // Fall back to non-segmented mode
           setSegmentationReady(false)
+          setSegmentationError(
+            'AI background removal unavailable. You can still use the camera without virtual backgrounds.'
+          )
         }
       }
     }
@@ -136,10 +167,14 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     initSegmentation()
 
     return () => {
-      mounted = false
-      if (segmentationRef.current) {
-        segmentationRef.current.close()
-        segmentationRef.current = null
+      cancelled = true
+      if (segmenterRef.current) {
+        try {
+          segmenterRef.current.close()
+        } catch {
+          // Ignore cleanup errors
+        }
+        segmenterRef.current = null
       }
     }
   }, [])
@@ -162,45 +197,44 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
   }, [selectedBg, customBackgrounds])
 
-  // ── Canvas rendering with segmentation ────────────────────────────
-  const renderFrame = useCallback(() => {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
+  // ── Ensure offscreen canvases exist at the right size ────────────
+  const ensureOffscreenCanvas = useCallback(
+    (ref: React.MutableRefObject<HTMLCanvasElement | null>, label: string) => {
+      const { w, h } = canvasSizeRef.current
+      if (!ref.current || ref.current.width !== w || ref.current.height !== h) {
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        ref.current = c
+      }
+      return ref.current
+    },
+    []
+  )
 
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const width = canvas.width
-    const height = canvas.height
-    const bg = allBackgrounds.find((b) => b.id === selectedBg)
-
-    // If we have segmentation results, use them for proper virtual background
-    const results = latestResultsRef.current
-    if (results && segmentationReady && bg && bg.type !== 'none') {
-      // Clear canvas
-      ctx.clearRect(0, 0, width, height)
-
-      // Save context state
-      ctx.save()
-
-      // Step 1: Draw the segmentation mask (person mask)
-      // The mask is a grayscale image where white = person, black = background
-      ctx.drawImage(results.segmentationMask, 0, 0, width, height)
-
-      // Step 2: Use 'source-in' to draw ONLY the person from the original image
-      // This keeps only pixels where the mask is white (person area)
-      ctx.globalCompositeOperation = 'source-in'
-      ctx.drawImage(results.image, 0, 0, width, height)
-
-      // Step 3: Draw the background BEHIND the person
-      ctx.globalCompositeOperation = 'destination-over'
+  // ── Draw background on a given context ───────────────────────────
+  const drawBackground = useCallback(
+    (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+      const bg = allBackgrounds.find((b) => b.id === selectedBg)
+      if (!bg || bg.type === 'none') {
+        // Draw black background
+        ctx.fillStyle = '#1c1917'
+        ctx.fillRect(0, 0, width, height)
+        return
+      }
 
       if (bg.type === 'blur') {
         // Draw blurred video as background
-        ctx.filter = 'blur(12px)'
-        ctx.drawImage(results.image, 0, 0, width, height)
+        ctx.save()
+        ctx.filter = 'blur(16px) brightness(0.7)'
+        if (videoRef.current && videoRef.current.readyState >= 2) {
+          // Mirror for selfie view
+          ctx.translate(width, 0)
+          ctx.scale(-1, 1)
+          ctx.drawImage(videoRef.current, 0, 0, width, height)
+        }
         ctx.filter = 'none'
+        ctx.restore()
       } else if (bg.type === 'color') {
         ctx.fillStyle = bg.value
         ctx.fillRect(0, 0, width, height)
@@ -218,100 +252,282 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
         }
         ctx.fillRect(0, 0, width, height)
       } else if ((bg.type === 'image' || bg.type === 'custom') && bgImageRef.current) {
-        ctx.drawImage(bgImageRef.current, 0, 0, width, height)
+        // Draw custom background image with "cover" scaling
+        const img = bgImageRef.current
+        const imgAspect = img.width / img.height
+        const canvasAspect = width / height
+        let drawW: number, drawH: number, drawX: number, drawY: number
+        if (imgAspect > canvasAspect) {
+          drawH = height
+          drawW = height * imgAspect
+          drawX = (width - drawW) / 2
+          drawY = 0
+        } else {
+          drawW = width
+          drawH = width / imgAspect
+          drawX = 0
+          drawY = (height - drawH) / 2
+        }
+        ctx.drawImage(img, drawX, drawY, drawW, drawH)
+      } else {
+        // Fallback - dark background
+        ctx.fillStyle = '#1c1917'
+        ctx.fillRect(0, 0, width, height)
+      }
+    },
+    [selectedBg, allBackgrounds]
+  )
+
+  // ── Process segmentation mask into a proper alpha mask ───────────
+  const processMask = useCallback(
+    (categoryMask: any, width: number, height: number): HTMLCanvasElement | null => {
+      const maskCanvas = ensureOffscreenCanvas(maskCanvasRef, 'mask')
+
+      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
+      if (!maskCtx) return null
+
+      // Draw the category mask to our temp canvas
+      maskCtx.clearRect(0, 0, width, height)
+
+      try {
+        if (typeof categoryMask === 'object' && categoryMask !== null) {
+          // MPMask from ImageSegmenter: try canvas property first, then as image source
+          const drawable = categoryMask.canvas || categoryMask
+          maskCtx.drawImage(drawable as CanvasImageSource, 0, 0, width, height)
+        }
+      } catch (e) {
+        console.warn('Failed to draw categoryMask:', e)
+        return null
       }
 
-      // Restore context
-      ctx.restore()
-    } else {
-      // No segmentation or no background selected - just draw the video
+      // Get the pixel data and convert to a proper alpha mask
+      const maskData = maskCtx.getImageData(0, 0, width, height)
+      const pixels = maskData.data
+
+      // Check the max value to determine if we need scaling
+      // Some versions output 0/1, others 0/255
+      let maxVal = 0
+      for (let i = 0; i < Math.min(pixels.length, 400); i += 4) {
+        if (pixels[i] > maxVal) maxVal = pixels[i]
+      }
+
+      const needsScaling = maxVal <= 1
+
+      // Convert to alpha mask: person = white+opaque, background = transparent
+      for (let i = 0; i < pixels.length; i += 4) {
+        const category = needsScaling ? pixels[i] * 255 : pixels[i]
+        // Any non-zero category is "person" in selfie segmentation
+        const isPerson = category > 128
+        pixels[i] = 255 // R
+        pixels[i + 1] = 255 // G
+        pixels[i + 2] = 255 // B
+        pixels[i + 3] = isPerson ? 255 : 0 // A
+      }
+
+      maskCtx.putImageData(maskData, 0, 0)
+      return maskCanvas
+    },
+    [ensureOffscreenCanvas]
+  )
+
+  // ── Main render loop ─────────────────────────────────────────────
+  const renderFrame = useCallback(() => {
+    if (!cameraActiveRef.current) return
+
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) {
+      animFrameRef.current = requestAnimationFrame(renderFrame)
+      return
+    }
+
+    // Don't render if video isn't ready
+    if (video.readyState < 2) {
+      animFrameRef.current = requestAnimationFrame(renderFrame)
+      return
+    }
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const width = canvas.width
+    const height = canvas.height
+    const bg = allBackgrounds.find((b) => b.id === selectedBg)
+    const hasVirtualBg = bg && bg.type !== 'none'
+
+    // ── If no virtual background or no segmentation, just draw mirrored video ──
+    if (!hasVirtualBg || !segmenterRef.current || !segmentationReady) {
       ctx.clearRect(0, 0, width, height)
+      ctx.save()
+      ctx.translate(width, 0)
+      ctx.scale(-1, 1)
       ctx.drawImage(video, 0, 0, width, height)
+      ctx.restore()
+
+      animFrameRef.current = requestAnimationFrame(renderFrame)
+      return
+    }
+
+    // ── Run segmentation (~15fps to conserve CPU/GPU) ────────────
+    const now = performance.now()
+    let maskCanvas: HTMLCanvasElement | null = maskCanvasRef.current
+
+    if (now - lastSegmentTimeRef.current > 66) {
+      try {
+        const result = segmenterRef.current.segmentForVideo(video, now)
+        lastSegmentTimeRef.current = now
+
+        if (result && result.categoryMask) {
+          maskCanvas = processMask(result.categoryMask, width, height)
+        }
+      } catch (err) {
+        // Segmentation might fail on some frames, use last good mask
+      }
+    }
+
+    // ── Composite using GPU-accelerated canvas operations ────────
+    if (maskCanvas) {
+      // Use a person canvas to hold the person cutout
+      const personCanvas = ensureOffscreenCanvas(personCanvasRef, 'person')
+      const personCtx = personCanvas.getContext('2d')
+      if (personCtx) {
+        // Step 1: Draw the alpha mask on the person canvas
+        personCtx.clearRect(0, 0, width, height)
+        personCtx.drawImage(maskCanvas, 0, 0, width, height)
+
+        // Step 2: Use 'source-in' to draw video only where mask is opaque (person area)
+        personCtx.globalCompositeOperation = 'source-in'
+        personCtx.save()
+        personCtx.translate(width, 0)
+        personCtx.scale(-1, 1)
+        personCtx.drawImage(video, 0, 0, width, height)
+        personCtx.restore()
+        personCtx.globalCompositeOperation = 'source-over'
+
+        // Step 3: On main canvas, draw background first
+        ctx.clearRect(0, 0, width, height)
+        drawBackground(ctx, width, height)
+
+        // Step 4: Draw the person on top of the background
+        ctx.drawImage(personCanvas, 0, 0, width, height)
+      } else {
+        // Fallback: just draw video
+        ctx.clearRect(0, 0, width, height)
+        drawBackground(ctx, width, height)
+        ctx.save()
+        ctx.translate(width, 0)
+        ctx.scale(-1, 1)
+        ctx.drawImage(video, 0, 0, width, height)
+        ctx.restore()
+      }
+    } else {
+      // No mask available yet - just draw video mirrored
+      ctx.clearRect(0, 0, width, height)
+      drawBackground(ctx, width, height)
+      ctx.save()
+      ctx.translate(width, 0)
+      ctx.scale(-1, 1)
+      ctx.globalAlpha = 0.7
+      ctx.drawImage(video, 0, 0, width, height)
+      ctx.globalAlpha = 1
+      ctx.restore()
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [selectedBg, segmentationReady, allBackgrounds])
-
-  // ── Process video frames through segmentation ────────────────────
-  useEffect(() => {
-    if (!cameraActive || !videoRef.current || !segmentationRef.current) return
-
-    let processing = false
-    let cancelled = false
-
-    async function processFrame() {
-      if (cancelled) return
-      const video = videoRef.current
-      const segmentation = segmentationRef.current
-
-      if (video && segmentation && video.readyState >= 2 && !processing) {
-        processing = true
-        try {
-          await segmentation.send({ image: video })
-        } catch {
-          // Ignore segmentation errors (can happen during camera stop)
-        }
-        processing = false
-      }
-
-      if (!cancelled && cameraActive) {
-        requestAnimationFrame(processFrame)
-      }
-    }
-
-    processFrame()
-
-    return () => {
-      cancelled = true
-    }
-  }, [cameraActive, segmentationReady])
+  }, [selectedBg, segmentationReady, allBackgrounds, drawBackground, processMask, ensureOffscreenCanvas])
 
   // ── Start / stop render loop ─────────────────────────────────────
   useEffect(() => {
-    if (cameraActive && videoRef.current && canvasRef.current) {
+    if (cameraActive && videoReady) {
       animFrameRef.current = requestAnimationFrame(renderFrame)
     }
     return () => {
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current)
+        animFrameRef.current = 0
       }
     }
-  }, [cameraActive, renderFrame])
+  }, [cameraActive, videoReady, renderFrame])
 
-  // ── Set canvas dimensions when video metadata loads ──────────────
+  // ── Handle video metadata loaded ─────────────────────────────────
   const handleVideoLoaded = useCallback(() => {
     const video = videoRef.current
     const canvas = canvasRef.current
     if (video && canvas) {
-      canvas.width = video.videoWidth || 640
-      canvas.height = video.videoHeight || 480
+      const vw = video.videoWidth || DEFAULT_VIDEO_WIDTH
+      const vh = video.videoHeight || DEFAULT_VIDEO_HEIGHT
+      canvas.width = vw
+      canvas.height = vh
+      canvasSizeRef.current = { w: vw, h: vh }
+      // Reset offscreen canvases so they'll be recreated at the new size
+      maskCanvasRef.current = null
+      personCanvasRef.current = null
+      setVideoReady(true)
     }
   }, [])
 
   // ── Start camera ─────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     setError(null)
+    setVideoReady(false)
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user',
+        },
         audio: false,
       })
       streamRef.current = stream
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play()
+
+        // Set canvas to default size immediately so we can start rendering
+        if (canvasRef.current) {
+          canvasRef.current.width = DEFAULT_VIDEO_WIDTH
+          canvasRef.current.height = DEFAULT_VIDEO_HEIGHT
+          canvasSizeRef.current = { w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT }
+        }
+
+        try {
+          await videoRef.current.play()
+        } catch {
+          // Some browsers need muted - try again
+          if (videoRef.current) {
+            videoRef.current.muted = true
+            await videoRef.current.play()
+          }
+        }
+
+        setCameraActive(true)
+      } else {
+        setCameraActive(true)
       }
-      setCameraActive(true)
     } catch (err) {
-      const message = err instanceof DOMException
-        ? err.name === 'NotAllowedError'
-          ? 'Camera access denied. Please allow camera permissions and try again.'
-          : err.name === 'NotFoundError'
-            ? 'No camera found. Please connect a camera and try again.'
-            : err.name === 'NotReadableError'
-              ? 'Camera is already in use by another application.'
-              : `Camera error: ${err.message}`
-        : 'An unexpected error occurred while accessing the camera.'
+      let message = 'An unexpected error occurred while accessing the camera.'
+
+      if (err instanceof DOMException) {
+        switch (err.name) {
+          case 'NotAllowedError':
+            message = 'Camera access denied. Please allow camera permissions and try again.'
+            break
+          case 'NotFoundError':
+            message = 'No camera found. Please connect a camera and try again.'
+            break
+          case 'NotReadableError':
+            message = 'Camera is already in use by another application.'
+            break
+          case 'OverconstrainedError':
+            message = 'Camera does not support the requested resolution. Try a different camera.'
+            break
+          default:
+            message = `Camera error: ${err.message}`
+        }
+      }
+
       setError(message)
       setCameraActive(false)
     }
@@ -321,6 +537,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const stopCamera = useCallback(() => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = 0
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -329,13 +546,16 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
-    latestResultsRef.current = null
+    maskCanvasRef.current = null
+    personCanvasRef.current = null
     setCameraActive(false)
+    setVideoReady(false)
   }, [])
 
   // ── Cleanup on unmount ───────────────────────────────────────────
   useEffect(() => {
     return () => {
+      cameraActiveRef.current = false
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
@@ -359,13 +579,11 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       setError('Please upload an image file (JPG, PNG, etc.)')
       return
     }
 
-    // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       setError('Image must be less than 10MB')
       return
@@ -393,12 +611,15 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   }, [])
 
   // ── Remove custom background ─────────────────────────────────────
-  const removeCustomBg = useCallback((bgId: string) => {
-    setCustomBackgrounds((prev) => prev.filter((b) => b.id !== bgId))
-    if (selectedBg === bgId) {
-      setSelectedBg('none')
-    }
-  }, [selectedBg])
+  const removeCustomBg = useCallback(
+    (bgId: string) => {
+      setCustomBackgrounds((prev) => prev.filter((b) => b.id !== bgId))
+      if (selectedBg === bgId) {
+        setSelectedBg('none')
+      }
+    },
+    [selectedBg]
+  )
 
   // ── Take photo ───────────────────────────────────────────────────
   const takePhoto = useCallback(() => {
@@ -408,12 +629,25 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     setCapturing(true)
 
     try {
-      // The canvas already has the composited image (person + background)
-      // Just capture it directly
       const dataUrl = canvas.toDataURL('image/png')
       onCapture?.(dataUrl)
     } catch {
-      // Canvas tainted or other error
+      // Canvas tainted or other error - try to capture from video directly
+      try {
+        const tempCanvas = document.createElement('canvas')
+        tempCanvas.width = canvas.width
+        tempCanvas.height = canvas.height
+        const tempCtx = tempCanvas.getContext('2d')
+        if (tempCtx && videoRef.current) {
+          tempCtx.translate(tempCanvas.width, 0)
+          tempCtx.scale(-1, 1)
+          tempCtx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height)
+          const dataUrl = tempCanvas.toDataURL('image/png')
+          onCapture?.(dataUrl)
+        }
+      } catch {
+        // Final fallback - ignore
+      }
     } finally {
       setTimeout(() => setCapturing(false), 300)
     }
@@ -421,6 +655,11 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
 
   // ── Current background for UI ────────────────────────────────────
   const currentBg = allBackgrounds.find((b) => b.id === selectedBg)
+
+  // ── Should we show canvas or raw video? ──────────────────────────
+  // Show canvas when: camera is active AND (video is ready AND we have a canvas to render to)
+  // Show raw video as fallback when canvas isn't rendering yet
+  const showCanvas = cameraActive && videoReady
 
   // ── Render ───────────────────────────────────────────────────────
   return (
@@ -438,7 +677,10 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
                 variant="outline"
                 size="sm"
                 className="mt-4 border-stone-600 text-stone-300 hover:bg-stone-700 hover:text-stone-100"
-                onClick={() => { setError(null); startCamera() }}
+                onClick={() => {
+                  setError(null)
+                  startCamera()
+                }}
               >
                 Try Again
               </Button>
@@ -453,36 +695,57 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
             </div>
           ) : (
             <>
-              {/* Hidden video element - we render via canvas */}
+              {/* Video element - visible as primary display until canvas takes over */}
               <video
                 ref={videoRef}
                 onLoadedMetadata={handleVideoLoaded}
-                className="hidden"
+                className={`absolute inset-0 w-full h-full object-cover ${showCanvas ? 'hidden' : ''}`}
                 playsInline
                 muted
+                style={{ transform: 'scaleX(-1)' }}
               />
               {/* Canvas for rendering the composited output */}
               <canvas
                 ref={canvasRef}
-                className="absolute inset-0 w-full h-full object-cover"
+                className={`absolute inset-0 w-full h-full object-cover ${showCanvas ? '' : 'hidden'}`}
               />
-              {/* Model loading indicator */}
-              {modelLoading && (
-                <div className="absolute top-3 left-3 flex items-center gap-2 bg-stone-900/80 rounded-lg px-3 py-1.5">
-                  <div className="size-3 rounded-full bg-amber-400 animate-pulse" />
-                  <span className="text-xs text-amber-300">Loading AI model...</span>
+
+              {/* Status indicators */}
+              <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
+                {/* Model loading indicator */}
+                {modelLoading && (
+                  <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                    <Loader2 className="size-3 text-amber-400 animate-spin" />
+                    <span className="text-xs text-amber-300">Loading AI model...</span>
+                  </div>
+                )}
+                {/* Segmentation ready indicator */}
+                {segmentationReady && !modelLoading && (
+                  <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                    <div className="size-2.5 rounded-full bg-emerald-400" />
+                    <span className="text-xs text-emerald-300">AI background removal active</span>
+                  </div>
+                )}
+                {/* Segmentation failed indicator */}
+                {segmentationError && !modelLoading && (
+                  <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                    <AlertCircle className="size-3 text-stone-400" />
+                    <span className="text-xs text-stone-400">No AI bg removal</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Current background indicator */}
+              {currentBg && currentBg.type !== 'none' && (
+                <div className="absolute top-3 right-3 flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5 z-10">
+                  <Sparkles className="size-3 text-teal-400" />
+                  <span className="text-xs text-teal-300">{currentBg.label}</span>
                 </div>
               )}
-              {/* Segmentation status */}
-              {cameraActive && !segmentationReady && !modelLoading && (
-                <div className="absolute top-3 left-3 flex items-center gap-2 bg-stone-900/80 rounded-lg px-3 py-1.5">
-                  <div className="size-3 rounded-full bg-stone-500" />
-                  <span className="text-xs text-stone-400">No AI segmentation</span>
-                </div>
-              )}
+
               {/* Capture flash effect */}
               {capturing && (
-                <div className="absolute inset-0 bg-white/80 animate-pulse pointer-events-none" />
+                <div className="absolute inset-0 bg-white/80 animate-pulse pointer-events-none z-20" />
               )}
             </>
           )}
@@ -526,9 +789,10 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
                     className={`
                       relative flex flex-col items-center gap-1 rounded-md p-1.5 w-full
                       transition-all duration-150 cursor-pointer
-                      ${isActive
-                        ? 'ring-2 ring-teal-500 ring-offset-1 ring-offset-stone-900 bg-stone-800'
-                        : 'hover:bg-stone-800/60 bg-transparent'
+                      ${
+                        isActive
+                          ? 'ring-2 ring-teal-500 ring-offset-1 ring-offset-stone-900 bg-stone-800'
+                          : 'hover:bg-stone-800/60 bg-transparent'
                       }
                     `}
                     title={bg.label}
@@ -538,22 +802,22 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
                     <div
                       className={`
                         size-8 rounded-md overflow-hidden flex items-center justify-center
-                        border border-stone-600/50
+                        border border-stone-600/50 relative
                         ${bg.preview}
                       `}
                     >
-                      {bg.type === 'none' && (
-                        <CameraOff className="size-3.5 text-stone-300" />
-                      )}
-                      {bg.type === 'blur' && (
-                        <Sparkles className="size-3.5 text-stone-200" />
-                      )}
+                      {bg.type === 'none' && <CameraOff className="size-3.5 text-stone-300" />}
+                      {bg.type === 'blur' && <Sparkles className="size-3.5 text-stone-200" />}
                       {(bg.type === 'image' || bg.type === 'custom') && !isCustom && (
                         <ImageIcon className="size-3.5 text-stone-200" />
                       )}
                       {/* Show thumbnail for custom backgrounds */}
                       {isCustom && bg.value && (
-                        <img src={bg.value} alt="" className="absolute inset-0.5 size-7 object-cover rounded" />
+                        <img
+                          src={bg.value}
+                          alt=""
+                          className="absolute inset-0.5 size-7 object-cover rounded"
+                        />
                       )}
                     </div>
                     <span className="text-[9px] leading-tight text-stone-500 group-hover:text-stone-300 truncate w-full text-center">
@@ -563,7 +827,10 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
                   {/* Remove button for custom backgrounds */}
                   {isCustom && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); removeCustomBg(bg.id) }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeCustomBg(bg.id)
+                      }}
                       className="absolute -top-1 -right-1 size-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                       aria-label={`Remove ${bg.label}`}
                     >

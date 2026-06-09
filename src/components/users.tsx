@@ -357,11 +357,12 @@ export default function UsersPage() {
   }
 
   // Available roles based on current user's role
+  // SUPER_ADMIN can create any role, ORG_ADMIN can only create FACILITATOR
   const availableRoles = currentRole === 'SUPER_ADMIN'
     ? ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR']
     : currentRole === 'ORG_ADMIN'
     ? ['FACILITATOR']
-    : []
+    : [] // FACILITATOR shouldn't reach this page (guarded above)
 
   // Available orgs based on current user's role
   const availableOrgs = currentRole === 'SUPER_ADMIN'
@@ -369,6 +370,21 @@ export default function UsersPage() {
     : currentRole === 'ORG_ADMIN'
     ? orgs.filter((o) => o.id === currentOrgId)
     : []
+
+  // FACILITATOR should not access this page
+  if (currentRole === 'FACILITATOR') {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
+          <Users className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-semibold">Access Restricted</h2>
+        <p className="text-muted-foreground text-center max-w-sm">
+          Facilitators do not have access to user management. Contact your organization admin for assistance.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -462,7 +478,7 @@ export default function UsersPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {(currentRole === 'SUPER_ADMIN' || (currentRole === 'ORG_ADMIN' && user.role === 'FACILITATOR')) && (
+                          {(currentRole === 'SUPER_ADMIN' || (currentRole === 'ORG_ADMIN' && user.role === 'FACILITATOR' && user.organizationId === currentOrgId)) && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="size-8">
@@ -684,18 +700,22 @@ export default function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-role">Role *</Label>
-              <Select value={formRole} onValueChange={(val) => { setFormRole(val); if (val !== 'ORG_ADMIN' && val !== 'FACILITATOR') setFormOrgId('') }}>
-                <SelectTrigger id="edit-role">
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRoles.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {getRoleLabel(role)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {currentRole === 'ORG_ADMIN' ? (
+                <Input value={getRoleLabel(formRole)} disabled />
+              ) : (
+                <Select value={formRole} onValueChange={(val) => { setFormRole(val); if (val !== 'ORG_ADMIN' && val !== 'FACILITATOR') setFormOrgId('') }}>
+                  <SelectTrigger id="edit-role">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableRoles.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {getRoleLabel(role)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             {currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && (
               <div className="space-y-2">
@@ -729,6 +749,15 @@ export default function UsersPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {currentRole === 'ORG_ADMIN' && currentOrgId && (
+              <div className="space-y-2">
+                <Label>Organization</Label>
+                <Input
+                  value={orgs.find((o) => o.id === currentOrgId)?.name || 'Your Organization'}
+                  disabled
+                />
               </div>
             )}
           </div>
