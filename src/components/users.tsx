@@ -323,8 +323,8 @@ export default function UsersPage() {
       toast.error('Please fill in all required fields')
       return
     }
-    if (currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && !formOrgId) {
-      toast.error('Organization is required for Org Admin role')
+    if (currentRole === 'SUPER_ADMIN' && (formRole === 'ORG_ADMIN' || formRole === 'FACILITATOR') && !formOrgId) {
+      toast.error('Organization is required for this role')
       return
     }
     createMutation.mutate({
@@ -341,8 +341,8 @@ export default function UsersPage() {
       toast.error('Please fill in all required fields')
       return
     }
-    if (currentRole === 'SUPER_ADMIN' && formRole === 'ORG_ADMIN' && !formOrgId) {
-      toast.error('Organization is required for Org Admin role')
+    if (currentRole === 'SUPER_ADMIN' && (formRole === 'ORG_ADMIN' || formRole === 'FACILITATOR') && !formOrgId) {
+      toast.error('Organization is required for this role')
       return
     }
     updateMutation.mutate({
@@ -606,10 +606,10 @@ export default function UsersPage() {
             )}
             {currentRole === 'SUPER_ADMIN' && formRole === 'FACILITATOR' && (
               <div className="space-y-2">
-                <Label htmlFor="create-org">Organization</Label>
+                <Label htmlFor="create-org">Organization *</Label>
                 <Select value={formOrgId} onValueChange={setFormOrgId}>
                   <SelectTrigger id="create-org">
-                    <SelectValue placeholder="Select organization (optional)" />
+                    <SelectValue placeholder="Select organization (required)" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableOrgs.map((org) => (
@@ -736,10 +736,10 @@ export default function UsersPage() {
             )}
             {currentRole === 'SUPER_ADMIN' && formRole === 'FACILITATOR' && (
               <div className="space-y-2">
-                <Label htmlFor="edit-org">Organization</Label>
+                <Label htmlFor="edit-org">Organization *</Label>
                 <Select value={formOrgId} onValueChange={setFormOrgId}>
                   <SelectTrigger id="edit-org">
-                    <SelectValue placeholder="Select organization (optional)" />
+                    <SelectValue placeholder="Select organization (required)" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableOrgs.map((org) => (

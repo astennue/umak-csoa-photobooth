@@ -10,10 +10,13 @@ function canSeePassword(ctx: { role: string | null; userId: string | null; organ
   if (!ctx.role || !ctx.userId) return false
   // SUPER_ADMIN can see ALL passwords
   if (ctx.role === 'SUPER_ADMIN') return true
-  // ORG_ADMIN can see passwords of users in their org (but NOT SuperAdmin passwords) + their own
+  // ORG_ADMIN can see own password + FACILITATOR passwords in their org
+  // CANNOT see SUPER_ADMIN passwords or other ORG_ADMIN passwords
   if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
-    if (targetUser.role === 'SUPER_ADMIN') return false
-    return targetUser.organizationId === ctx.organizationId || targetUser.id === ctx.userId
+    // Own password
+    if (targetUser.id === ctx.userId) return true
+    // FACILITATOR passwords in same org only
+    return targetUser.organizationId === ctx.organizationId && targetUser.role === 'FACILITATOR'
   }
   // FACILITATOR cannot see any passwords
   return false

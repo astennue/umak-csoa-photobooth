@@ -52,6 +52,11 @@ export async function POST(request: NextRequest) {
       return errorResponse('Organization is required when creating an Org Admin account')
     }
 
+    // SUPER_ADMIN creating FACILITATOR must specify organization
+    if (ctx.role === 'SUPER_ADMIN' && role === 'FACILITATOR' && !organizationId) {
+      return errorResponse('Organization is required when creating a Facilitator account')
+    }
+
     // Check email uniqueness
     const existingUser = await db.user.findUnique({ where: { email } })
     if (existingUser) {

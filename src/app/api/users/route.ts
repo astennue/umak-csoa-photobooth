@@ -64,14 +64,20 @@ export async function GET(request: NextRequest) {
         // SUPER_ADMIN can see ALL passwords
         visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
       } else if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
-        // ORG_ADMIN can see passwords of users in their org + their own
-        if (user.organizationId === ctx.organizationId || user.id === ctx.userId) {
-          // But NOT SuperAdmin passwords
-          if (user.role !== 'SUPER_ADMIN') {
-            visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
-          }
+        // ORG_ADMIN can see own password + FACILITATOR passwords in their org
+        // CANNOT see SUPER_ADMIN passwords or other ORG_ADMIN passwords
+        if (user.id === ctx.userId) {
+          // Own password
+          visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
+        } else if (
+          user.organizationId === ctx.organizationId &&
+          user.role === 'FACILITATOR'
+        ) {
+          // FACILITATOR passwords in same org
+          visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
         }
       }
+      // FACILITATOR cannot see any passwords (visiblePassword stays null)
 
       // Remove plainPassword from response, add visiblePassword
       const { plainPassword, ...userWithoutPlainPassword } = user
