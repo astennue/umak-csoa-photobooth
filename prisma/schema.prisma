@@ -81,6 +81,7 @@ model Session {
   event           Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
   queueEntries    QueueEntry[]
   gallery         Gallery[]
+  emailLogs       EmailLog[]
   sessionAuditLogs AuditLog[]
 }
 
@@ -104,16 +105,24 @@ model QueueEntry {
 }
 
 model Template {
-  id          String   @id @default(cuid())
-  eventId     String
-  name        String
-  description String?
-  frameUrl    String?
-  overlayUrl  String?
-  settings    String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  eventId         String
+  name            String
+  description     String?
+  stripImageUrl   String?   // The uploaded strip design image (was frameUrl)
+  frameUrl        String?   // Keep for backward compat
+  overlayUrl      String?   // Keep for backward compat
+  placeholders    String?   // JSON: [{x, y, width, height, borderRadius}] - photo slot positions (percentages)
+  layout          String?   // Quick layout name: "1x2", "2x2", "1x3", "2x3", "custom"
+  captureMode     String?   @default("manual") // "manual" | "auto" - auto = sequential capture
+  captureDelay    Int?      @default(3)         // Seconds between auto-captures
+  includeGif      Boolean   @default(false)     // Whether to also capture a boomerang/GIF
+  printAuto       Boolean   @default(false)     // Auto-print after capture
+  emailAuto       Boolean   @default(false)     // Auto-email after capture
+  active          Boolean   @default(true)
+  settings        String?   // Keep for backward compat
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
 }
@@ -151,6 +160,20 @@ model AuditLog {
   auditLogEvent  Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
   auditLogSession Session?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  to          String
+  subject     String
+  status      String   @default("QUEUED")  // QUEUED, SENT, FAILED
+  photoUrl    String?  // URL or path to the photo
+  error       String?  // Error message if failed
+  sessionId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  emailSession Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 }
 
 model Device {

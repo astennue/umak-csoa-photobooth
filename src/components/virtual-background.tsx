@@ -91,6 +91,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const [modelLoading, setModelLoading] = useState(false)
   const [segmentationReady, setSegmentationReady] = useState(false)
   const [segmentationError, setSegmentationError] = useState<string | null>(null)
+  const [segmentationMaskFailed, setSegmentationMaskFailed] = useState(false)
 
   const allBackgrounds = useMemo(
     () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
@@ -117,6 +118,8 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const selectedBgRef = useRef<string>(selectedBg)
   const allBackgroundsRef = useRef<BackgroundOption[]>(allBackgrounds)
   const isVirtualBgActiveRef = useRef<boolean>(false)
+  const maskFailCountRef = useRef(0)
+  const segmentationMaskFailedRef = useRef(false)
 
   // ── Keep refs in sync ──
   useEffect(() => { cameraActiveRef.current = cameraActive }, [cameraActive])
@@ -201,8 +204,14 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
   }, [])
 
-  // ── Load background image ──
+  // ── Load background image + reset mask state when BG changes ──
   useEffect(() => {
+    // Reset mask failure tracking when background changes
+    maskFailCountRef.current = 0
+    segmentationMaskFailedRef.current = false
+    setSegmentationMaskFailed(false)
+    maskCanvasRef.current = null
+
     const bg = allBackgrounds.find((b) => b.id === selectedBg)
     if (bg?.type === 'image' || bg?.type === 'custom') {
       const img = new Image()
@@ -292,46 +301,142 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   )
 
   // ── Process segmentation mask ──
+  // MediaPipe's categoryMask may be a WebGL canvas, MPImage object, or typed array.
+  // We try multiple strategies to extract the pixel data, and handle both
+  // float16 (values 0/1 in uint8) and uint8 (values 0/255) mask formats.
+  // Returns null if mask cannot be processed (signals no mask available).
   const processMask = useCallback(
     (categoryMask: any, width: number, height: number): HTMLCanvasElement | null => {
       const maskCanvas = ensureOffscreenCanvas(maskCanvasRef)
       const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
-      if (!maskCtx) return null
-
-      maskCtx.clearRect(0, 0, width, height)
-
-      try {
-        if (typeof categoryMask === 'object' && categoryMask !== null) {
-          const drawable = categoryMask.canvas || categoryMask
-          maskCtx.drawImage(drawable as CanvasImageSource, 0, 0, width, height)
-        }
-      } catch {
+      if (!maskCtx) {
+        maskCanvasRef.current = null
         return null
       }
 
+      maskCtx.clearRect(0, 0, width, height)
+
+      let drawSucceeded = false
+
+      // Strategy 1: Try categoryMask.canvas as drawable source
+      // MPImage's .canvas may be HTMLCanvasElement, OffscreenCanvas, or other drawable
+      if (!drawSucceeded && categoryMask?.canvas) {
+        try {
+          maskCtx.drawImage(categoryMask.canvas as CanvasImageSource, 0, 0, width, height)
+          drawSucceeded = true
+        } catch { /* fallthrough */ }
+      }
+
+      // Strategy 2: Try drawing categoryMask directly as CanvasImageSource
+      if (!drawSucceeded) {
+        try {
+          maskCtx.drawImage(categoryMask as CanvasImageSource, 0, 0, width, height)
+          drawSucceeded = true
+        } catch { /* fallthrough */ }
+      }
+
+      // Strategy 3: Try MPImage's getImageData() method
+      if (!drawSucceeded) {
+        try {
+          if (typeof categoryMask?.getImageData === 'function') {
+            const imgData = categoryMask.getImageData()
+            maskCtx.putImageData(imgData, 0, 0)
+            drawSucceeded = true
+          }
+        } catch { /* fallthrough */ }
+      }
+
+      // Strategy 4: Try using categoryMask as raw typed array with width/height
+      if (!drawSucceeded) {
+        try {
+          const maskWidth = categoryMask?.width ?? width
+          const maskHeight = categoryMask?.height ?? height
+          const rawData = categoryMask?.data ?? categoryMask
+          if (
+            (rawData instanceof Uint8Array ||
+              rawData instanceof Uint8ClampedArray ||
+              rawData instanceof Float32Array) &&
+            rawData.length >= maskWidth * maskHeight
+          ) {
+            const imgData = maskCtx.createImageData(maskWidth, maskHeight)
+            for (let i = 0; i < maskWidth * maskHeight; i++) {
+              const val = rawData instanceof Float32Array
+                ? Math.round(rawData[i] * 255)
+                : rawData[i]
+              imgData.data[i * 4] = val
+              imgData.data[i * 4 + 1] = val
+              imgData.data[i * 4 + 2] = val
+              imgData.data[i * 4 + 3] = 255
+            }
+            maskCtx.putImageData(imgData, 0, 0)
+            drawSucceeded = true
+          }
+        } catch { /* fallthrough */ }
+      }
+
+      if (!drawSucceeded) {
+        console.warn('processMask: Could not extract data from categoryMask — all strategies failed')
+        maskCanvasRef.current = null
+        return null
+      }
+
+      // Read back the mask data to create binary person/background mask
       const maskData = maskCtx.getImageData(0, 0, width, height)
       const pixels = maskData.data
 
+      // Detect pixel value range from first 400 pixels (1600 bytes / 4 channels):
+      // selfie_segmenter float16 returns category 0 = background, 1 = person.
+      // When drawn on a 2D canvas, values may appear as:
+      //   - 0/1 in uint8 (float16, needs scaling * 255)
+      //   - 0/255 in uint8 (proper scale)
       let maxVal = 0
-      for (let i = 0; i < Math.min(pixels.length, 400); i += 4) {
+      for (let i = 0; i < Math.min(pixels.length, 1600); i += 4) {
         if (pixels[i] > maxVal) maxVal = pixels[i]
       }
 
+      // If maxVal <= 1, the model returned float16-style 0/1 values — scale by 255
       const needsScaling = maxVal <= 1
 
+      let personPixelCount = 0
       for (let i = 0; i < pixels.length; i += 4) {
         const category = needsScaling ? pixels[i] * 255 : pixels[i]
-        const isPerson = category > 128
-        pixels[i] = 255
-        pixels[i + 1] = 255
-        pixels[i + 2] = 255
-        pixels[i + 3] = isPerson ? 255 : 0
+        // Person = any non-zero category value after proper scaling
+        // (NOT > 128 — the old threshold that broke float16 masks)
+        const isPerson = category > 0
+        if (isPerson) personPixelCount++
+        pixels[i] = 255     // R
+        pixels[i + 1] = 255 // G
+        pixels[i + 2] = 255 // B
+        pixels[i + 3] = isPerson ? 255 : 0 // Alpha
+      }
+
+      // If no person pixels found, the mask is invalid
+      if (personPixelCount === 0) {
+        console.warn('processMask: No person pixels detected in mask — mask is invalid')
+        maskCanvasRef.current = null
+        return null
       }
 
       maskCtx.putImageData(maskData, 0, 0)
       return maskCanvas
     },
     [ensureOffscreenCanvas]
+  )
+
+  // ── Draw background + full video (no masking) ──
+  // Used as fallback when segmentation fails or mask is unavailable
+  const drawBgPlusVideo = useCallback(
+    (ctx: CanvasRenderingContext2D, video: HTMLVideoElement, width: number, height: number) => {
+      ctx.clearRect(0, 0, width, height)
+      drawBackground(ctx, width, height)
+      ctx.save()
+      ctx.globalAlpha = 1
+      ctx.translate(width, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(video, 0, 0, width, height)
+      ctx.restore()
+    },
+    [drawBackground]
   )
 
   // ── Main render loop — ONLY runs when virtual BG is active ──
@@ -356,18 +461,9 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     const width = canvas.width
     const height = canvas.height
 
-    // No segmentation — draw video on canvas with background
+    // If no segmentation available, draw background + full video (no person separation)
     if (!segmenterRef.current || !segmentationReady) {
-      ctx.clearRect(0, 0, width, height)
-      drawBackground(ctx, width, height)
-      ctx.save()
-      ctx.translate(width, 0)
-      ctx.scale(-1, 1)
-      ctx.globalAlpha = 0.8
-      ctx.drawImage(video, 0, 0, width, height)
-      ctx.globalAlpha = 1
-      ctx.restore()
-
+      drawBgPlusVideo(ctx, video, width, height)
       animFrameRef.current = requestAnimationFrame(renderFrame)
       return
     }
@@ -375,6 +471,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     // Run segmentation
     const now = performance.now()
     let maskCanvas: HTMLCanvasElement | null = maskCanvasRef.current
+    let maskFailed = false
 
     if (now - lastSegmentTimeRef.current > 66) {
       try {
@@ -382,10 +479,34 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
         lastSegmentTimeRef.current = now
         if (result && result.categoryMask) {
           maskCanvas = processMask(result.categoryMask, width, height)
+          if (maskCanvas) {
+            // Mask succeeded — reset failure tracking
+            maskFailCountRef.current = 0
+            if (segmentationMaskFailedRef.current) {
+              segmentationMaskFailedRef.current = false
+              setSegmentationMaskFailed(false)
+            }
+          } else {
+            // processMask returned null — mask extraction failed
+            maskFailed = true
+          }
         }
       } catch {
-        // Use last good mask
+        // Segmentation threw — use last good mask if available
+        maskFailed = true
       }
+    }
+
+    // Track consecutive mask failures
+    if (maskFailed) {
+      maskFailCountRef.current++
+      if (maskFailCountRef.current > 5 && !segmentationMaskFailedRef.current) {
+        segmentationMaskFailedRef.current = true
+        setSegmentationMaskFailed(true)
+      }
+      // Invalidate maskCanvasRef since mask is bad — prevents reusing corrupted canvas
+      maskCanvasRef.current = null
+      maskCanvas = null
     }
 
     // Composite
@@ -408,42 +529,76 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
         drawBackground(ctx, width, height)
         ctx.drawImage(personCanvas, 0, 0, width, height)
       } else {
-        ctx.clearRect(0, 0, width, height)
-        drawBackground(ctx, width, height)
-        ctx.save()
-        ctx.translate(width, 0)
-        ctx.scale(-1, 1)
-        ctx.drawImage(video, 0, 0, width, height)
-        ctx.restore()
+        // personCtx unavailable — fallback to bg + full video
+        drawBgPlusVideo(ctx, video, width, height)
       }
     } else {
-      ctx.clearRect(0, 0, width, height)
-      drawBackground(ctx, width, height)
-      ctx.save()
-      ctx.translate(width, 0)
-      ctx.scale(-1, 1)
-      ctx.globalAlpha = 0.7
-      ctx.drawImage(video, 0, 0, width, height)
-      ctx.globalAlpha = 1
-      ctx.restore()
+      // No valid mask available — draw background + full video (no masking)
+      drawBgPlusVideo(ctx, video, width, height)
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas])
+  }, [segmentationReady, drawBackground, drawBgPlusVideo, processMask, ensureOffscreenCanvas])
 
   // ── Start/stop render loop ──
   useEffect(() => {
     if (cameraActive && isVirtualBgActive) {
-      if (canvasRef.current && videoRef.current) {
-        const vw = videoRef.current.videoWidth || DEFAULT_VIDEO_WIDTH
-        const vh = videoRef.current.videoHeight || DEFAULT_VIDEO_HEIGHT
-        canvasRef.current.width = vw
-        canvasRef.current.height = vh
-        canvasSizeRef.current = { w: vw, h: vh }
+      let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+      // Set canvas dimensions — wait for video metadata to be loaded
+      const setCanvasSize = () => {
+        const video = videoRef.current
+        const canvas = canvasRef.current
+        if (!video || !canvas) return false
+
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          canvasSizeRef.current = { w: video.videoWidth, h: video.videoHeight }
+          maskCanvasRef.current = null
+          personCanvasRef.current = null
+          return true
+        }
+
+        // Video not ready yet — use defaults, will be corrected on first frame
+        canvas.width = DEFAULT_VIDEO_WIDTH
+        canvas.height = DEFAULT_VIDEO_HEIGHT
+        canvasSizeRef.current = { w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT }
         maskCanvasRef.current = null
         personCanvasRef.current = null
+        return true
       }
+
+      const sizeSet = setCanvasSize()
+
+      // If video wasn't ready yet, retry after a short delay for metadata
+      if (!sizeSet || (videoRef.current && videoRef.current.readyState < 2)) {
+        retryTimer = setTimeout(() => {
+          setCanvasSize()
+          // Update canvas size ref in case dimensions changed
+          const video = videoRef.current
+          if (video && video.readyState >= 2 && video.videoWidth > 0) {
+            const canvas = canvasRef.current
+            if (canvas) {
+              canvas.width = video.videoWidth
+              canvas.height = video.videoHeight
+              canvasSizeRef.current = { w: video.videoWidth, h: video.videoHeight }
+              maskCanvasRef.current = null
+              personCanvasRef.current = null
+            }
+          }
+        }, 500)
+      }
+
       animFrameRef.current = requestAnimationFrame(renderFrame)
+
+      return () => {
+        if (retryTimer) clearTimeout(retryTimer)
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current)
+          animFrameRef.current = 0
+        }
+      }
     }
     return () => {
       if (animFrameRef.current) {
@@ -536,6 +691,9 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     // when cameraActive becomes false. Cleanup useEffect handles it.
     maskCanvasRef.current = null
     personCanvasRef.current = null
+    maskFailCountRef.current = 0
+    segmentationMaskFailedRef.current = false
+    setSegmentationMaskFailed(false)
     setCameraActive(false)
     setSelectedBg('none')
   }, [])
@@ -713,22 +871,34 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
                     <span className="text-xs text-amber-300">Loading AI model...</span>
                   </div>
                 )}
-                {segmentationReady && !modelLoading && !isVirtualBgActive && (
+                {segmentationReady && !modelLoading && !isVirtualBgActive && !segmentationError && (
                   <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
                     <div className="size-2.5 rounded-full bg-emerald-400" />
                     <span className="text-xs text-emerald-300">AI ready — select a background</span>
                   </div>
                 )}
-                {segmentationReady && !modelLoading && isVirtualBgActive && (
+                {segmentationReady && !modelLoading && isVirtualBgActive && !segmentationMaskFailed && (
                   <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
                     <Sparkles className="size-3 text-emerald-400" />
                     <span className="text-xs text-emerald-300">AI background active</span>
                   </div>
                 )}
                 {segmentationError && !modelLoading && (
-                  <div className="flex items-center gap-2 bg-stone-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
-                    <AlertCircle className="size-3 text-stone-400" />
-                    <span className="text-xs text-stone-400">No AI bg removal</span>
+                  <div className="flex items-center gap-2 bg-red-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5" title="Person will not be separated from background">
+                    <AlertCircle className="size-3 text-red-300" />
+                    <span className="text-xs text-red-300">AI Failed - BG won't separate person</span>
+                  </div>
+                )}
+                {!modelLoading && !segmentationReady && !segmentationError && isVirtualBgActive && (
+                  <div className="flex items-center gap-2 bg-amber-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5" title="Virtual background selected but AI model not loaded yet">
+                    <AlertCircle className="size-3 text-amber-300" />
+                    <span className="text-xs text-amber-300">Selecting BG without AI</span>
+                  </div>
+                )}
+                {segmentationMaskFailed && !segmentationError && (
+                  <div className="flex items-center gap-2 bg-red-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5" title="AI model loaded but mask extraction is failing — person will not be separated">
+                    <AlertCircle className="size-3 text-red-300" />
+                    <span className="text-xs text-red-300">AI Separation Failed</span>
                   </div>
                 )}
               </div>

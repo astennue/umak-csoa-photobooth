@@ -3,6 +3,14 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import {
   Camera,
   CameraOff,
@@ -18,8 +26,20 @@ import {
   RotateCcw,
   ArrowLeft,
   Radio,
+  AlertCircle,
+  LayoutTemplate,
+  Play,
+  Square,
+  Mail,
+  Printer,
+  RefreshCw,
+  Video,
+  Send,
+  Check,
+  Ban,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useQuery } from '@tanstack/react-query'
 import { useAppStore } from '@/lib/store'
 
 /* ------------------------------------------------------------------ */
@@ -40,6 +60,32 @@ interface CapturedPhoto {
   id: string
   dataUrl: string
   timestamp: number
+}
+
+interface PlaceholderDef {
+  x: number
+  y: number
+  width: number
+  height: number
+  borderRadius?: number
+}
+
+interface TemplateData {
+  id: string
+  name: string
+  description?: string | null
+  stripImageUrl?: string | null
+  frameUrl?: string | null
+  overlayUrl?: string | null
+  placeholders?: string | null
+  layout?: string | null
+  captureMode?: string | null
+  captureDelay?: number | null
+  includeGif?: boolean
+  printAuto?: boolean
+  emailAuto?: boolean
+  active?: boolean
+  event?: { id: string; name: string }
 }
 
 /* ------------------------------------------------------------------ */
@@ -67,6 +113,23 @@ const BUILT_IN_BACKGROUNDS: BackgroundOption[] = [
 
 const DEFAULT_VIDEO_WIDTH = 1280
 const DEFAULT_VIDEO_HEIGHT = 720
+const DEFAULT_STRIP_WIDTH = 1200
+const DEFAULT_STRIP_HEIGHT = 1800
+
+/* ------------------------------------------------------------------ */
+/*  Parse placeholders JSON safely                                     */
+/* ------------------------------------------------------------------ */
+
+function parsePlaceholders(raw: string | null | undefined): PlaceholderDef[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed
+    return []
+  } catch {
+    return []
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main Component — Photo Booth Kiosk                                 */
@@ -75,7 +138,7 @@ const DEFAULT_VIDEO_HEIGHT = 720
 /* ------------------------------------------------------------------ */
 
 export default function LiveDisplay() {
-  const { setCurrentPage } = useAppStore()
+  const { setCurrentPage, activeSession } = useAppStore()
 
   // ── Camera state ──
   const [cameraActive, setCameraActive] = useState(false)
@@ -83,6 +146,8 @@ export default function LiveDisplay() {
   const [capturing, setCapturing] = useState(false)
   const [modelLoading, setModelLoading] = useState(false)
   const [segmentationReady, setSegmentationReady] = useState(false)
+  const [segmentationError, setSegmentationError] = useState(false)
+  const [segmentationMaskFailed, setSegmentationMaskFailed] = useState(false)
 
   // ── Background state ──
   const [selectedBg, setSelectedBg] = useState<string>('none')
@@ -97,6 +162,23 @@ export default function LiveDisplay() {
   const [mirrorVideo, setMirrorVideo] = useState(true)
   const [timerMode, setTimerMode] = useState<0 | 3 | 5 | 10>(0)
 
+  // ── Template state ──
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateData | null>(null)
+  const [templatePhotos, setTemplatePhotos] = useState<string[]>([]) // dataUrls for template placeholder slots
+  const [autoCapturing, setAutoCapturing] = useState(false)
+  const [autoCaptureCancelled, setAutoCaptureCancelled] = useState(false)
+  const [compositeImage, setCompositeImage] = useState<string | null>(null)
+  const [showComposite, setShowComposite] = useState(false)
+  const [boomerangBlob, setBoomerangBlob] = useState<Blob | null>(null)
+  const [boomerangUrl, setBoomerangUrl] = useState<string | null>(null)
+  const [recordingBoomerang, setRecordingBoomerang] = useState(false)
+  const [guestEmail, setGuestEmail] = useState('')
+  const [showEmailInput, setShowEmailInput] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [printingPhoto, setPrintingPhoto] = useState(false)
+  const [autoCaptureStep, setAutoCaptureStep] = useState(0)
+  const [autoCaptureTotal, setAutoCaptureTotal] = useState(0)
+
   const allBackgrounds = useMemo(
     () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
     [customBackgrounds]
@@ -105,6 +187,35 @@ export default function LiveDisplay() {
   // ── Derived: is a virtual background active? ──
   const currentBg = allBackgrounds.find((b) => b.id === selectedBg)
   const isVirtualBgActive = currentBg && currentBg.type !== 'none'
+
+  // ── Template derived values ──
+  const templatePlaceholders = useMemo(
+    () => parsePlaceholders(selectedTemplate?.placeholders ?? null),
+    [selectedTemplate?.placeholders]
+  )
+  const isAutoCapture = selectedTemplate?.captureMode === 'auto'
+  const captureDelay = selectedTemplate?.captureDelay ?? 3
+  const allSlotsFilled = selectedTemplate
+    ? templatePlaceholders.length > 0 && templatePhotos.length >= templatePlaceholders.length
+    : false
+
+  // ── Fetch templates ──
+  const { data: templatesData } = useQuery({
+    queryKey: ['templates-live'],
+    queryFn: async () => {
+      const res = await fetch('/api/templates?limit=100')
+      if (!res.ok) throw new Error('Failed to fetch templates')
+      const json = await res.json()
+      return json.data ?? json
+    },
+    staleTime: 30000,
+  })
+
+  const templates: TemplateData[] = useMemo(() => {
+    if (!templatesData) return []
+    if (Array.isArray(templatesData)) return templatesData.filter((t: TemplateData) => t.active !== false)
+    return []
+  }, [templatesData])
 
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -127,6 +238,12 @@ export default function LiveDisplay() {
   const mirrorVideoRef = useRef<boolean>(mirrorVideo)
   const isVirtualBgActiveRef = useRef<boolean>(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const maskFailCountRef = useRef(0)
+  const segmentationMaskFailedRef = useRef(false)
+  const autoCaptureCancelledRef = useRef(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordedChunksRef = useRef<Blob[]>([])
+  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   // ── Keep refs in sync ──
   useEffect(() => { cameraActiveRef.current = cameraActive }, [cameraActive])
@@ -134,6 +251,7 @@ export default function LiveDisplay() {
   useEffect(() => { allBackgroundsRef.current = allBackgrounds }, [allBackgrounds])
   useEffect(() => { mirrorVideoRef.current = mirrorVideo }, [mirrorVideo])
   useEffect(() => { isVirtualBgActiveRef.current = !!isVirtualBgActive }, [isVirtualBgActive])
+  useEffect(() => { autoCaptureCancelledRef.current = autoCaptureCancelled }, [autoCaptureCancelled])
 
   // ── Initialize MediaPipe segmentation ──
   useEffect(() => {
@@ -142,6 +260,7 @@ export default function LiveDisplay() {
     async function initSegmentation() {
       try {
         setModelLoading(true)
+        setSegmentationError(false)
 
         const visionModule = await import('@mediapipe/tasks-vision')
         const { FilesetResolver, ImageSegmenter } = visionModule
@@ -169,7 +288,7 @@ export default function LiveDisplay() {
           if (cancelled) return
           segmenter = await ImageSegmenter.createFromOptions(vision, {
             baseOptions: {
-              modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              modelAssetFile: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
               delegate: 'CPU',
             },
             runningMode: 'VIDEO',
@@ -185,12 +304,14 @@ export default function LiveDisplay() {
 
         segmenterRef.current = segmenter
         setSegmentationReady(true)
+        setSegmentationError(false)
         setModelLoading(false)
       } catch (err) {
         console.warn('Segmentation init failed:', err)
         if (!cancelled) {
           setModelLoading(false)
           setSegmentationReady(false)
+          setSegmentationError(true)
         }
       }
     }
@@ -206,8 +327,13 @@ export default function LiveDisplay() {
     }
   }, [])
 
-  // ── Load background image ──
+  // ── Load background image + reset mask state when BG changes ──
   useEffect(() => {
+    maskFailCountRef.current = 0
+    segmentationMaskFailedRef.current = false
+    setSegmentationMaskFailed(false)
+    maskCanvasRef.current = null
+
     const bg = allBackgrounds.find((b) => b.id === selectedBg)
     if (bg?.type === 'custom') {
       const img = new Image()
@@ -303,16 +429,69 @@ export default function LiveDisplay() {
     (categoryMask: any, width: number, height: number): HTMLCanvasElement | null => {
       const maskCanvas = ensureOffscreenCanvas(maskCanvasRef)
       const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
-      if (!maskCtx) return null
+      if (!maskCtx) {
+        maskCanvasRef.current = null
+        return null
+      }
 
       maskCtx.clearRect(0, 0, width, height)
 
-      try {
-        if (typeof categoryMask === 'object' && categoryMask !== null) {
-          const drawable = categoryMask.canvas || categoryMask
-          maskCtx.drawImage(drawable as CanvasImageSource, 0, 0, width, height)
-        }
-      } catch {
+      let drawSucceeded = false
+
+      if (!drawSucceeded && categoryMask?.canvas) {
+        try {
+          maskCtx.drawImage(categoryMask.canvas as CanvasImageSource, 0, 0, width, height)
+          drawSucceeded = true
+        } catch { /* fallthrough */ }
+      }
+
+      if (!drawSucceeded) {
+        try {
+          maskCtx.drawImage(categoryMask as CanvasImageSource, 0, 0, width, height)
+          drawSucceeded = true
+        } catch { /* fallthrough */ }
+      }
+
+      if (!drawSucceeded) {
+        try {
+          if (typeof categoryMask?.getImageData === 'function') {
+            const imgData = categoryMask.getImageData()
+            maskCtx.putImageData(imgData, 0, 0)
+            drawSucceeded = true
+          }
+        } catch { /* fallthrough */ }
+      }
+
+      if (!drawSucceeded) {
+        try {
+          const maskWidth = categoryMask?.width ?? width
+          const maskHeight = categoryMask?.height ?? height
+          const rawData = categoryMask?.data ?? categoryMask
+          if (
+            (rawData instanceof Uint8Array ||
+              rawData instanceof Uint8ClampedArray ||
+              rawData instanceof Float32Array) &&
+            rawData.length >= maskWidth * maskHeight
+          ) {
+            const imgData = maskCtx.createImageData(maskWidth, maskHeight)
+            for (let i = 0; i < maskWidth * maskHeight; i++) {
+              const val = rawData instanceof Float32Array
+                ? Math.round(rawData[i] * 255)
+                : rawData[i]
+              imgData.data[i * 4] = val
+              imgData.data[i * 4 + 1] = val
+              imgData.data[i * 4 + 2] = val
+              imgData.data[i * 4 + 3] = 255
+            }
+            maskCtx.putImageData(imgData, 0, 0)
+            drawSucceeded = true
+          }
+        } catch { /* fallthrough */ }
+      }
+
+      if (!drawSucceeded) {
+        console.warn('processMask: Could not extract data from categoryMask — all strategies failed')
+        maskCanvasRef.current = null
         return null
       }
 
@@ -320,24 +499,50 @@ export default function LiveDisplay() {
       const pixels = maskData.data
 
       let maxVal = 0
-      for (let i = 0; i < Math.min(pixels.length, 400); i += 4) {
+      for (let i = 0; i < Math.min(pixels.length, 1600); i += 4) {
         if (pixels[i] > maxVal) maxVal = pixels[i]
       }
+
       const needsScaling = maxVal <= 1
 
+      let personPixelCount = 0
       for (let i = 0; i < pixels.length; i += 4) {
         const category = needsScaling ? pixels[i] * 255 : pixels[i]
-        const isPerson = category > 128
+        const isPerson = category > 0
+        if (isPerson) personPixelCount++
         pixels[i] = 255
         pixels[i + 1] = 255
         pixels[i + 2] = 255
         pixels[i + 3] = isPerson ? 255 : 0
       }
 
+      if (personPixelCount === 0) {
+        console.warn('processMask: No person pixels detected in mask — mask is invalid')
+        maskCanvasRef.current = null
+        return null
+      }
+
       maskCtx.putImageData(maskData, 0, 0)
       return maskCanvas
     },
     [ensureOffscreenCanvas]
+  )
+
+  // ── Draw background + full video (no masking) ──
+  const drawBgPlusVideo = useCallback(
+    (ctx: CanvasRenderingContext2D, video: HTMLVideoElement, width: number, height: number) => {
+      ctx.clearRect(0, 0, width, height)
+      drawBackground(ctx, width, height)
+      ctx.save()
+      ctx.globalAlpha = 1
+      if (mirrorVideoRef.current) {
+        ctx.translate(width, 0)
+        ctx.scale(-1, 1)
+      }
+      ctx.drawImage(video, 0, 0, width, height)
+      ctx.restore()
+    },
+    [drawBackground]
   )
 
   // ── Main render loop — ONLY runs when virtual BG is active ──
@@ -362,27 +567,15 @@ export default function LiveDisplay() {
     const width = canvas.width
     const height = canvas.height
 
-    // If no segmentation available, just draw video on canvas (with background)
     if (!segmenterRef.current || !segmentationReady) {
-      ctx.clearRect(0, 0, width, height)
-      drawBackground(ctx, width, height)
-      ctx.save()
-      if (mirrorVideoRef.current) {
-        ctx.translate(width, 0)
-        ctx.scale(-1, 1)
-      }
-      ctx.globalAlpha = 0.8
-      ctx.drawImage(video, 0, 0, width, height)
-      ctx.globalAlpha = 1
-      ctx.restore()
-
+      drawBgPlusVideo(ctx, video, width, height)
       animFrameRef.current = requestAnimationFrame(renderFrame)
       return
     }
 
-    // Run segmentation (~15fps)
     const now = performance.now()
     let maskCanvas: HTMLCanvasElement | null = maskCanvasRef.current
+    let maskFailed = false
 
     if (now - lastSegmentTimeRef.current > 66) {
       try {
@@ -390,13 +583,31 @@ export default function LiveDisplay() {
         lastSegmentTimeRef.current = now
         if (result && result.categoryMask) {
           maskCanvas = processMask(result.categoryMask, width, height)
+          if (maskCanvas) {
+            maskFailCountRef.current = 0
+            if (segmentationMaskFailedRef.current) {
+              segmentationMaskFailedRef.current = false
+              setSegmentationMaskFailed(false)
+            }
+          } else {
+            maskFailed = true
+          }
         }
       } catch {
-        // Use last good mask
+        maskFailed = true
       }
     }
 
-    // Composite with mask
+    if (maskFailed) {
+      maskFailCountRef.current++
+      if (maskFailCountRef.current > 5 && !segmentationMaskFailedRef.current) {
+        segmentationMaskFailedRef.current = true
+        setSegmentationMaskFailed(true)
+      }
+      maskCanvasRef.current = null
+      maskCanvas = null
+    }
+
     if (maskCanvas) {
       const personCanvas = ensureOffscreenCanvas(personCanvasRef)
       const personCtx = personCanvas.getContext('2d')
@@ -418,47 +629,70 @@ export default function LiveDisplay() {
         drawBackground(ctx, width, height)
         ctx.drawImage(personCanvas, 0, 0, width, height)
       } else {
-        ctx.clearRect(0, 0, width, height)
-        drawBackground(ctx, width, height)
-        ctx.save()
-        if (mirrorVideoRef.current) {
-          ctx.translate(width, 0)
-          ctx.scale(-1, 1)
-        }
-        ctx.drawImage(video, 0, 0, width, height)
-        ctx.restore()
+        drawBgPlusVideo(ctx, video, width, height)
       }
     } else {
-      ctx.clearRect(0, 0, width, height)
-      drawBackground(ctx, width, height)
-      ctx.save()
-      if (mirrorVideoRef.current) {
-        ctx.translate(width, 0)
-        ctx.scale(-1, 1)
-      }
-      ctx.globalAlpha = 0.7
-      ctx.drawImage(video, 0, 0, width, height)
-      ctx.globalAlpha = 1
-      ctx.restore()
+      drawBgPlusVideo(ctx, video, width, height)
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas])
+  }, [segmentationReady, drawBackground, drawBgPlusVideo, processMask, ensureOffscreenCanvas])
 
-  // ── Start/stop render loop — only when virtual BG is active AND camera is on ──
+  // ── Start/stop render loop ──
   useEffect(() => {
     if (cameraActive && isVirtualBgActive) {
-      // Set canvas dimensions when starting
-      if (canvasRef.current && videoRef.current) {
-        const vw = videoRef.current.videoWidth || DEFAULT_VIDEO_WIDTH
-        const vh = videoRef.current.videoHeight || DEFAULT_VIDEO_HEIGHT
-        canvasRef.current.width = vw
-        canvasRef.current.height = vh
-        canvasSizeRef.current = { w: vw, h: vh }
+      let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+      const setCanvasSize = () => {
+        const video = videoRef.current
+        const canvas = canvasRef.current
+        if (!video || !canvas) return false
+
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          canvasSizeRef.current = { w: video.videoWidth, h: video.videoHeight }
+          maskCanvasRef.current = null
+          personCanvasRef.current = null
+          return true
+        }
+
+        canvas.width = DEFAULT_VIDEO_WIDTH
+        canvas.height = DEFAULT_VIDEO_HEIGHT
+        canvasSizeRef.current = { w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT }
         maskCanvasRef.current = null
         personCanvasRef.current = null
+        return true
       }
+
+      const sizeSet = setCanvasSize()
+
+      if (!sizeSet || (videoRef.current && videoRef.current.readyState < 2)) {
+        retryTimer = setTimeout(() => {
+          setCanvasSize()
+          const video = videoRef.current
+          if (video && video.readyState >= 2 && video.videoWidth > 0) {
+            const canvas = canvasRef.current
+            if (canvas) {
+              canvas.width = video.videoWidth
+              canvas.height = video.videoHeight
+              canvasSizeRef.current = { w: video.videoWidth, h: video.videoHeight }
+              maskCanvasRef.current = null
+              personCanvasRef.current = null
+            }
+          }
+        }, 500)
+      }
+
       animFrameRef.current = requestAnimationFrame(renderFrame)
+
+      return () => {
+        if (retryTimer) clearTimeout(retryTimer)
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current)
+          animFrameRef.current = 0
+        }
+      }
     }
     return () => {
       if (animFrameRef.current) {
@@ -469,7 +703,6 @@ export default function LiveDisplay() {
   }, [cameraActive, isVirtualBgActive, renderFrame])
 
   // ── Start camera ──
-  // Step 1: Acquire the stream and set cameraActive=true (which mounts the <video>)
   const startCamera = useCallback(async () => {
     setCameraError(null)
 
@@ -484,9 +717,6 @@ export default function LiveDisplay() {
         audio: false,
       })
       streamRef.current = stream
-
-      // Setting cameraActive=true will mount the <video> element.
-      // The useEffect below will then attach the stream and call play().
       setCameraActive(true)
     } catch (err) {
       let message = 'An unexpected error occurred while accessing the camera.'
@@ -513,7 +743,7 @@ export default function LiveDisplay() {
     }
   }, [])
 
-  // ── Step 2: When cameraActive becomes true and video element mounts, attach stream ──
+  // ── Attach stream to video when cameraActive ──
   useEffect(() => {
     if (!cameraActive) return
 
@@ -523,10 +753,8 @@ export default function LiveDisplay() {
 
     video.srcObject = stream
     video.play().catch(() => {
-      // Some browsers require muted for autoplay
       video.muted = true
       video.play().catch(() => {
-        // If play still fails, show error
         setCameraError('Failed to start video playback. Please try again.')
         setCameraActive(false)
       })
@@ -543,13 +771,12 @@ export default function LiveDisplay() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
-    // Don't access videoRef.current here — the <video> element will be
-    // unmounted on the next render when cameraActive becomes false.
-    // Just clear the state and the cleanup useEffect will handle the rest.
     maskCanvasRef.current = null
     personCanvasRef.current = null
+    maskFailCountRef.current = 0
+    segmentationMaskFailedRef.current = false
+    setSegmentationMaskFailed(false)
     setCameraActive(false)
-    // Reset to no background when camera stops
     setSelectedBg('none')
   }, [])
 
@@ -569,26 +796,15 @@ export default function LiveDisplay() {
     }
   }, [])
 
-  // ── Take photo ──
-  const capturePhoto = useCallback(() => {
+  // ── Capture a single photo from video/canvas and return dataUrl ──
+  const captureSinglePhoto = useCallback((): string | null => {
     const video = videoRef.current
-    if (!video || !cameraActive) return
-
-    setCapturing(true)
+    if (!video || !cameraActive) return null
 
     try {
-      // If virtual BG is active, capture from canvas
       if (isVirtualBgActiveRef.current && canvasRef.current) {
-        const dataUrl = canvasRef.current.toDataURL('image/png')
-        const photo: CapturedPhoto = {
-          id: `photo-${Date.now()}`,
-          dataUrl,
-          timestamp: Date.now(),
-        }
-        setCapturedPhotos((prev) => [photo, ...prev])
-        toast.success('Photo captured!', { duration: 2000 })
+        return canvasRef.current.toDataURL('image/png')
       } else {
-        // Capture from video directly
         const tempCanvas = document.createElement('canvas')
         tempCanvas.width = video.videoWidth || DEFAULT_VIDEO_WIDTH
         tempCanvas.height = video.videoHeight || DEFAULT_VIDEO_HEIGHT
@@ -599,25 +815,77 @@ export default function LiveDisplay() {
             tempCtx.scale(-1, 1)
           }
           tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height)
-          const dataUrl = tempCanvas.toDataURL('image/png')
-          const photo: CapturedPhoto = {
-            id: `photo-${Date.now()}`,
-            dataUrl,
-            timestamp: Date.now(),
-          }
-          setCapturedPhotos((prev) => [photo, ...prev])
-          toast.success('Photo captured!', { duration: 2000 })
+          return tempCanvas.toDataURL('image/png')
         }
       }
     } catch {
       toast.error('Failed to capture photo')
-    } finally {
-      setTimeout(() => setCapturing(false), 400)
     }
+    return null
   }, [cameraActive, mirrorVideo])
 
-  // ── Countdown + capture ──
+  // ── Take photo (non-template mode) ──
+  const capturePhoto = useCallback(() => {
+    const dataUrl = captureSinglePhoto()
+    if (!dataUrl) return
+
+    setCapturing(true)
+    const photo: CapturedPhoto = {
+      id: `photo-${Date.now()}`,
+      dataUrl,
+      timestamp: Date.now(),
+    }
+    setCapturedPhotos((prev) => [photo, ...prev])
+    toast.success('Photo captured!', { duration: 2000 })
+    setTimeout(() => setCapturing(false), 400)
+  }, [captureSinglePhoto])
+
+  // ── Take photo for template mode (fills a slot) ──
+  const captureTemplatePhoto = useCallback((): string | null => {
+    const dataUrl = captureSinglePhoto()
+    if (!dataUrl) return null
+
+    setCapturing(true)
+    setTemplatePhotos((prev) => [...prev, dataUrl])
+    toast.success(`Photo ${templatePhotos.length + 1}/${templatePlaceholders.length} captured!`, { duration: 1500 })
+    setTimeout(() => setCapturing(false), 400)
+    return dataUrl
+  }, [captureSinglePhoto, templatePhotos.length, templatePlaceholders.length])
+
+  // ── Countdown + capture (manual mode) ──
   const startCapture = useCallback(() => {
+    // Template mode
+    if (selectedTemplate) {
+      if (isAutoCapture) {
+        startAutoCapture()
+        return
+      }
+      // Manual template capture
+      if (allSlotsFilled) {
+        toast.info('All slots filled! Generating composite...')
+        generateComposite()
+        return
+      }
+      if (timerMode === 0) {
+        captureTemplatePhoto()
+        return
+      }
+      setCountdown(timerMode)
+      let remaining = timerMode
+      const interval = setInterval(() => {
+        remaining -= 1
+        if (remaining <= 0) {
+          clearInterval(interval)
+          setCountdown(null)
+          captureTemplatePhoto()
+        } else {
+          setCountdown(remaining)
+        }
+      }, 1000)
+      return
+    }
+
+    // Non-template mode
     if (timerMode === 0) {
       capturePhoto()
       return
@@ -635,7 +903,257 @@ export default function LiveDisplay() {
         setCountdown(remaining)
       }
     }, 1000)
-  }, [timerMode, capturePhoto])
+  }, [timerMode, capturePhoto, captureTemplatePhoto, selectedTemplate, isAutoCapture, allSlotsFilled])
+
+  // ── Auto-capture mode ──
+  const startAutoCapture = useCallback(() => {
+    if (!selectedTemplate || !isAutoCapture) return
+    const placeholders = parsePlaceholders(selectedTemplate.placeholders)
+    if (placeholders.length === 0) return
+
+    // Reset template photos for fresh auto capture
+    setTemplatePhotos([])
+    setAutoCapturing(true)
+    setAutoCaptureCancelled(false)
+    setAutoCaptureStep(0)
+    setAutoCaptureTotal(placeholders.length)
+
+    const delay = selectedTemplate.captureDelay ?? 3
+
+    const captureSequence = async () => {
+      for (let i = 0; i < placeholders.length; i++) {
+        if (autoCaptureCancelledRef.current) break
+
+        setAutoCaptureStep(i + 1)
+
+        // Show countdown (3 seconds)
+        for (let c = 3; c > 0; c--) {
+          if (autoCaptureCancelledRef.current) break
+          setCountdown(c)
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+        setCountdown(null)
+
+        if (autoCaptureCancelledRef.current) break
+
+        // Capture
+        const dataUrl = captureSinglePhoto()
+        if (dataUrl) {
+          setTemplatePhotos((prev) => [...prev, dataUrl])
+          setCapturing(true)
+          setTimeout(() => setCapturing(false), 400)
+        }
+
+        // Wait between captures (if not last)
+        if (i < placeholders.length - 1 && !autoCaptureCancelledRef.current) {
+          await new Promise((r) => setTimeout(r, delay * 1000))
+        }
+      }
+
+      setAutoCapturing(false)
+      if (!autoCaptureCancelledRef.current) {
+        toast.success('Shoot Complete!', { duration: 3000 })
+      }
+    }
+
+    captureSequence()
+  }, [selectedTemplate, isAutoCapture, captureSinglePhoto])
+
+  // ── Cancel auto-capture ──
+  const cancelAutoCapture = useCallback(() => {
+    setAutoCaptureCancelled(true)
+    autoCaptureCancelledRef.current = true
+    setAutoCapturing(false)
+    setCountdown(null)
+    toast.info('Auto-capture cancelled')
+  }, [])
+
+  // ── Generate composite image ──
+  const generateComposite = useCallback(() => {
+    if (!selectedTemplate) return
+    const placeholders = parsePlaceholders(selectedTemplate.placeholders)
+    if (placeholders.length === 0 || templatePhotos.length < placeholders.length) {
+      toast.error('Not all photo slots are filled yet')
+      return
+    }
+
+    const canvas = compositeCanvasRef.current ?? document.createElement('canvas')
+    compositeCanvasRef.current = canvas
+
+    const stripW = DEFAULT_STRIP_WIDTH
+    const stripH = DEFAULT_STRIP_HEIGHT
+    canvas.width = stripW
+    canvas.height = stripH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // Draw strip background (white default)
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, stripW, stripH)
+
+    const doComposite = () => {
+      // Draw each captured photo into its placeholder
+      placeholders.forEach((ph: PlaceholderDef, i: number) => {
+        const photoDataUrl = templatePhotos[i]
+        if (!photoDataUrl) return
+
+        const img = new Image()
+        img.onload = () => {
+          const px = (ph.x / 100) * stripW
+          const py = (ph.y / 100) * stripH
+          const pw = (ph.width / 100) * stripW
+          const phh = (ph.height / 100) * stripH
+          const br = (ph.borderRadius ?? 0) / 100 * Math.min(pw, phh)
+
+          ctx.save()
+          if (br > 0) {
+            ctx.beginPath()
+            ctx.roundRect(px, py, pw, phh, br)
+            ctx.clip()
+          }
+
+          // Cover-fit: center crop the image to fill the placeholder
+          const imgAspect = img.width / img.height
+          const slotAspect = pw / phh
+          let sx = 0, sy = 0, sw = img.width, sh = img.height
+          if (imgAspect > slotAspect) {
+            sw = img.height * slotAspect
+            sx = (img.width - sw) / 2
+          } else {
+            sh = img.width / slotAspect
+            sy = (img.height - sh) / 2
+          }
+          ctx.drawImage(img, sx, sy, sw, sh, px, py, pw, phh)
+          ctx.restore()
+        }
+        img.src = photoDataUrl
+      })
+    }
+
+    // If template has strip image, draw it first
+    const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
+    if (stripUrl) {
+      const stripImg = new Image()
+      stripImg.crossOrigin = 'anonymous'
+      stripImg.onload = () => {
+        ctx.drawImage(stripImg, 0, 0, stripW, stripH)
+        doComposite()
+
+        // Draw overlay if exists
+        if (selectedTemplate.overlayUrl) {
+          const overlayImg = new Image()
+          overlayImg.crossOrigin = 'anonymous'
+          overlayImg.onload = () => {
+            ctx.drawImage(overlayImg, 0, 0, stripW, stripH)
+            // Wait for photos to render, then output
+            setTimeout(() => {
+              const dataUrl = canvas.toDataURL('image/png')
+              setCompositeImage(dataUrl)
+              setShowComposite(true)
+              onCompositeReady(dataUrl)
+            }, 500)
+          }
+          overlayImg.src = selectedTemplate.overlayUrl
+        } else {
+          setTimeout(() => {
+            const dataUrl = canvas.toDataURL('image/png')
+            setCompositeImage(dataUrl)
+            setShowComposite(true)
+            onCompositeReady(dataUrl)
+          }, 500)
+        }
+      }
+      stripImg.onerror = () => {
+        doComposite()
+        setTimeout(() => {
+          const dataUrl = canvas.toDataURL('image/png')
+          setCompositeImage(dataUrl)
+          setShowComposite(true)
+          onCompositeReady(dataUrl)
+        }, 500)
+      }
+      stripImg.src = stripUrl
+    } else {
+      doComposite()
+      setTimeout(() => {
+        const dataUrl = canvas.toDataURL('image/png')
+        setCompositeImage(dataUrl)
+        setShowComposite(true)
+        onCompositeReady(dataUrl)
+      }, 500)
+    }
+  }, [selectedTemplate, templatePhotos])
+
+  // ── Called when composite is ready — auto-print/email ──
+  const onCompositeReady = useCallback((dataUrl: string) => {
+    if (!selectedTemplate) return
+
+    // Auto-print
+    if (selectedTemplate.printAuto) {
+      handlePrint(dataUrl)
+    }
+
+    // Auto-email
+    if (selectedTemplate.emailAuto) {
+      if (guestEmail.trim()) {
+        handleEmail(guestEmail.trim(), dataUrl)
+      } else {
+        setShowEmailInput(true)
+      }
+    }
+  }, [selectedTemplate, guestEmail])
+
+  // ── Check if all slots filled (auto-generate composite) ──
+  useEffect(() => {
+    if (!selectedTemplate || !allSlotsFilled || autoCapturing) return
+    // Small delay to let state settle
+    const timer = setTimeout(() => {
+      generateComposite()
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [templatePhotos.length, allSlotsFilled, selectedTemplate, autoCapturing, generateComposite])
+
+  // ── Boomerang recording ──
+  const startBoomerangRecording = useCallback(() => {
+    if (!streamRef.current) return
+
+    setRecordingBoomerang(true)
+    recordedChunksRef.current = []
+
+    try {
+      const mediaRecorder = new MediaRecorder(streamRef.current, {
+        mimeType: 'video/webm;codecs=vp8',
+      })
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' })
+        setBoomerangBlob(blob)
+        const url = URL.createObjectURL(blob)
+        setBoomerangUrl(url)
+        setRecordingBoomerang(false)
+        toast.success('Boomerang recorded!', { duration: 2000 })
+      }
+
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+
+      // Stop after 3 seconds
+      setTimeout(() => {
+        if (mediaRecorder.state === 'recording') {
+          mediaRecorder.stop()
+        }
+      }, 3000)
+    } catch {
+      toast.error('Failed to start boomerang recording')
+      setRecordingBoomerang(false)
+    }
+  }, [])
 
   // ── Download photo ──
   const downloadPhoto = useCallback((photo: CapturedPhoto) => {
@@ -646,12 +1164,124 @@ export default function LiveDisplay() {
     toast.success('Photo downloaded!')
   }, [])
 
+  // ── Download composite ──
+  const downloadComposite = useCallback(() => {
+    if (!compositeImage) return
+    const link = document.createElement('a')
+    link.download = `photobooth-strip-${Date.now()}.png`
+    link.href = compositeImage
+    link.click()
+    toast.success('Photo strip downloaded!')
+  }, [compositeImage])
+
   // ── Delete photo ──
   const deletePhoto = useCallback((photoId: string) => {
     setCapturedPhotos((prev) => prev.filter((p) => p.id !== photoId))
     if (selectedPhoto?.id === photoId) setSelectedPhoto(null)
     toast.success('Photo deleted')
   }, [selectedPhoto])
+
+  // ── Handle print ──
+  const handlePrint = useCallback(async (dataUrl?: string) => {
+    const photoData = dataUrl ?? compositeImage
+    if (!photoData) return
+
+    setPrintingPhoto(true)
+    try {
+      const res = await fetch('/api/print', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoDataUrl: photoData,
+          templateName: selectedTemplate?.name,
+          copies: 1,
+          sessionId: activeSession?.id,
+        }),
+      })
+      const json = await res.json()
+      if (json.success || json.data?.success) {
+        toast.success('Print job sent!', { duration: 2000 })
+        // Trigger browser print dialog
+        const printWindow = window.open('', '_blank')
+        if (printWindow) {
+          printWindow.document.write(`
+            <html><head><title>Print Photo</title></head>
+            <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
+              <img src="${photoData}" style="max-width:100%;max-height:100vh;object-contain" onload="window.print();window.close()" />
+            </body></html>
+          `)
+          printWindow.document.close()
+        }
+      } else {
+        toast.error('Print failed: ' + (json.error || 'Unknown error'))
+      }
+    } catch {
+      toast.error('Failed to send print job')
+    } finally {
+      setPrintingPhoto(false)
+    }
+  }, [compositeImage, selectedTemplate?.name, activeSession?.id])
+
+  // ── Handle email ──
+  const handleEmail = useCallback(async (email: string, dataUrl?: string) => {
+    const photoData = dataUrl ?? compositeImage
+    if (!photoData || !email) return
+
+    setSendingEmail(true)
+    try {
+      const res = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: email,
+          subject: `Your UMak CSOA Photobooth Photo${selectedTemplate ? ` - ${selectedTemplate.name}` : ''}`,
+          message: 'Here is your photo from the UMak CSOA Photobooth! Enjoy your memory!',
+          photoDataUrl: photoData,
+          templateName: selectedTemplate?.name,
+          sessionId: activeSession?.id,
+        }),
+      })
+      const json = await res.json()
+      if (json.success || json.data?.success) {
+        toast.success('Photo sent to email!', { duration: 3000 })
+        setShowEmailInput(false)
+      } else {
+        toast.error('Email failed: ' + (json.error || 'Unknown error'))
+      }
+    } catch {
+      toast.error('Failed to send email')
+    } finally {
+      setSendingEmail(false)
+    }
+  }, [compositeImage, selectedTemplate, activeSession?.id])
+
+  // ── Retake ──
+  const retakePhotos = useCallback(() => {
+    setTemplatePhotos([])
+    setCompositeImage(null)
+    setShowComposite(false)
+    setBoomerangBlob(null)
+    if (boomerangUrl) {
+      URL.revokeObjectURL(boomerangUrl)
+      setBoomerangUrl(null)
+    }
+    setAutoCapturing(false)
+    setAutoCaptureCancelled(false)
+    autoCaptureCancelledRef.current = false
+  }, [boomerangUrl])
+
+  // ── Select template ──
+  const selectTemplate = useCallback((template: TemplateData | null) => {
+    setSelectedTemplate(template)
+    setTemplatePhotos([])
+    setCompositeImage(null)
+    setShowComposite(false)
+    setBoomerangBlob(null)
+    if (boomerangUrl) {
+      URL.revokeObjectURL(boomerangUrl)
+      setBoomerangUrl(null)
+    }
+  }, [boomerangUrl])
 
   // ── Custom background upload ──
   const handleCustomBgUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -719,12 +1349,6 @@ export default function LiveDisplay() {
     <div ref={containerRef} className="absolute inset-0 flex flex-col bg-black">
       {/* ── Main Camera View ── */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
-        {/*
-          ── VIDEO: Always mounted in the DOM so the ref is always available.
-          Hidden with CSS when camera is off (opacity-0 + pointer-events-none).
-          Uses CSS scaleX(-1) for mirror effect.
-          When virtual BG is active, video hides behind canvas.
-        */}
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover"
@@ -738,10 +1362,6 @@ export default function LiveDisplay() {
           muted
         />
 
-        {/*
-          ── CANVAS: Only visible when virtual background is active ──
-          Renders on top of the video with composited output.
-        */}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full object-cover"
@@ -769,7 +1389,6 @@ export default function LiveDisplay() {
         ) : !cameraActive ? (
           /* Camera off — big start button */
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950 z-[2]">
-            {/* Floating header with back button */}
             <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 bg-gradient-to-b from-black/70 to-transparent z-10">
               <Button
                 variant="ghost"
@@ -784,7 +1403,7 @@ export default function LiveDisplay() {
                 <Radio className="size-4 text-emerald-400" />
                 <span className="text-sm font-semibold text-white">Live Display</span>
               </div>
-              <div className="w-16" /> {/* Spacer for centering */}
+              <div className="w-16" />
             </div>
             <div className="size-32 rounded-full bg-emerald-500/10 flex items-center justify-center mb-6 border-2 border-emerald-500/30">
               <Camera className="size-16 text-emerald-400" />
@@ -826,10 +1445,49 @@ export default function LiveDisplay() {
               <div className="absolute inset-0 bg-white/90 animate-pulse pointer-events-none z-20" />
             )}
 
+            {/* Template placeholder overlay on camera */}
+            {selectedTemplate && templatePlaceholders.length > 0 && !showComposite && (
+              <div className="absolute inset-0 z-[3] pointer-events-none">
+                {templatePlaceholders.map((ph: PlaceholderDef, i: number) => {
+                  const filled = i < templatePhotos.length
+                  return (
+                    <div
+                      key={i}
+                      className="absolute border-2 border-dashed flex items-center justify-center"
+                      style={{
+                        left: `${ph.x}%`,
+                        top: `${ph.y}%`,
+                        width: `${ph.width}%`,
+                        height: `${ph.height}%`,
+                        borderColor: filled ? 'rgba(52, 211, 153, 0.7)' : 'rgba(255, 255, 255, 0.5)',
+                        borderRadius: `${ph.borderRadius ?? 0}%`,
+                        backgroundColor: filled ? 'rgba(52, 211, 153, 0.15)' : 'rgba(0, 0, 0, 0.25)',
+                      }}
+                    >
+                      <span className="text-white/70 text-lg font-bold">
+                        {filled ? <Check className="size-6 text-emerald-300" /> : i + 1}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Auto-capture progress indicator */}
+            {autoCapturing && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[5] pointer-events-none">
+                <div className="rounded-full bg-black/70 backdrop-blur-sm px-5 py-2 flex items-center gap-2">
+                  <span className="text-sm font-medium text-white">
+                    Auto Capture {autoCaptureStep}/{autoCaptureTotal}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Top bar overlay */}
             <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 z-10 bg-gradient-to-b from-black/50 to-transparent">
               {/* Left: Back + Live indicator */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -846,13 +1504,41 @@ export default function LiveDisplay() {
                 {modelLoading && (
                   <div className="flex items-center gap-1.5 rounded-full bg-amber-500/80 px-3 py-1">
                     <Sparkles className="size-3 text-white animate-spin" />
-                    <span className="text-xs font-medium text-white">Loading AI...</span>
+                    <span className="text-xs font-medium text-white">AI Loading...</span>
                   </div>
                 )}
-                {segmentationReady && isVirtualBgActive && (
+                {!modelLoading && segmentationReady && !isVirtualBgActive && !segmentationError && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-emerald-600/60 px-3 py-1">
+                    <Sparkles className="size-3 text-white" />
+                    <span className="text-xs font-medium text-white">AI Ready</span>
+                  </div>
+                )}
+                {segmentationReady && isVirtualBgActive && !segmentationMaskFailed && (
                   <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/80 px-3 py-1">
                     <Sparkles className="size-3 text-white" />
                     <span className="text-xs font-medium text-white">AI Background</span>
+                  </div>
+                )}
+                {!modelLoading && segmentationError && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-red-600/80 px-3 py-1" title="Person will not be separated from background">
+                    <AlertCircle className="size-3 text-red-200" />
+                    <span className="text-xs font-medium text-red-200">AI Failed</span>
+                  </div>
+                )}
+                {segmentationMaskFailed && !segmentationError && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-red-500/80 px-3 py-1">
+                    <AlertCircle className="size-3 text-red-200" />
+                    <span className="text-xs font-medium text-red-200">AI Separation Failed</span>
+                  </div>
+                )}
+                {/* Template indicator */}
+                {selectedTemplate && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-emerald-700/80 px-3 py-1">
+                    <LayoutTemplate className="size-3 text-white" />
+                    <span className="text-xs font-medium text-white">{selectedTemplate.name}</span>
+                    <span className="text-xs text-emerald-200">
+                      {templatePhotos.length}/{templatePlaceholders.length}
+                    </span>
                   </div>
                 )}
               </div>
@@ -887,32 +1573,62 @@ export default function LiveDisplay() {
               </div>
             </div>
 
-            {/* Bottom strip — Background selector */}
+            {/* Bottom strip — Background + Template selector + Controls */}
             <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/70 via-black/40 to-transparent pt-16 pb-3 px-3">
               {/* Capture button area + timer */}
               <div className="flex items-center justify-center gap-4 mb-3">
                 {/* Timer button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-white/80 hover:text-white hover:bg-white/20 h-10 w-10 rounded-full"
-                  onClick={cycleTimer}
-                  title={`Timer: ${timerMode === 0 ? 'Off' : `${timerMode}s`}`}
-                >
-                  {timerMode === 0 ? <Timer className="size-5" /> : (
-                    <span className="text-sm font-bold">{timerMode}s</span>
-                  )}
-                </Button>
+                {!autoCapturing && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white/80 hover:text-white hover:bg-white/20 h-10 w-10 rounded-full"
+                    onClick={cycleTimer}
+                    title={`Timer: ${timerMode === 0 ? 'Off' : `${timerMode}s`}`}
+                  >
+                    {timerMode === 0 ? <Timer className="size-5" /> : (
+                      <span className="text-sm font-bold">{timerMode}s</span>
+                    )}
+                  </Button>
+                )}
 
-                {/* BIG CAPTURE BUTTON */}
-                <button
-                  onClick={startCapture}
-                  disabled={countdown !== null || capturing}
-                  className="relative size-20 rounded-full bg-white border-4 border-white/50 hover:border-white transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-white/20"
-                  aria-label="Take Photo"
-                >
-                  <div className="absolute inset-1 rounded-full bg-white hover:bg-emerald-100 transition-colors" />
-                </button>
+                {/* Capture / Auto-capture button */}
+                {autoCapturing ? (
+                  <button
+                    onClick={cancelAutoCapture}
+                    className="relative size-20 rounded-full bg-red-600 border-4 border-red-400 hover:border-red-300 transition-all duration-150 active:scale-95 shadow-xl shadow-red-900/40 flex items-center justify-center"
+                    aria-label="Cancel Auto-Capture"
+                  >
+                    <Ban className="size-8 text-white" />
+                  </button>
+                ) : isAutoCapture && selectedTemplate && !allSlotsFilled ? (
+                  <button
+                    onClick={startCapture}
+                    disabled={countdown !== null || capturing}
+                    className="relative size-20 rounded-full bg-emerald-600 border-4 border-emerald-400 hover:border-emerald-300 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-emerald-900/40 flex items-center justify-center gap-1"
+                    aria-label="Start Shoot"
+                  >
+                    <Play className="size-8 text-white" />
+                  </button>
+                ) : selectedTemplate && allSlotsFilled ? (
+                  <button
+                    onClick={generateComposite}
+                    disabled={countdown !== null || capturing}
+                    className="relative size-20 rounded-full bg-emerald-600 border-4 border-emerald-400 hover:border-emerald-300 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-emerald-900/40 flex items-center justify-center"
+                    aria-label="Generate Composite"
+                  >
+                    <LayoutTemplate className="size-8 text-white" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={startCapture}
+                    disabled={countdown !== null || capturing}
+                    className="relative size-20 rounded-full bg-white border-4 border-white/50 hover:border-white transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-white/20"
+                    aria-label="Take Photo"
+                  >
+                    <div className="absolute inset-1 rounded-full bg-white hover:bg-emerald-100 transition-colors" />
+                  </button>
+                )}
 
                 {/* Gallery button */}
                 <Button
@@ -928,6 +1644,100 @@ export default function LiveDisplay() {
                     </span>
                   )}
                 </Button>
+              </div>
+
+              {/* Guest email input + boomerang button (when template selected) */}
+              {selectedTemplate && (
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <div className="flex-1 relative">
+                    <Mail className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-white/40" />
+                    <Input
+                      type="email"
+                      placeholder="Guest email (optional)"
+                      value={guestEmail}
+                      onChange={(e) => setGuestEmail(e.target.value)}
+                      className="h-8 text-xs bg-white/10 border-white/20 text-white placeholder:text-white/40 pl-7 pr-2 rounded-lg"
+                    />
+                  </div>
+                  {selectedTemplate.includeGif && allSlotsFilled && !boomerangBlob && (
+                    <Button
+                      size="sm"
+                      onClick={startBoomerangRecording}
+                      disabled={recordingBoomerang}
+                      className="h-8 text-xs gap-1 bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      {recordingBoomerang ? (
+                        <>
+                          <Square className="size-3 animate-pulse" />
+                          <span>Rec...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Video className="size-3" />
+                          <span>Boomerang</span>
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Template selector strip */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-2 scrollbar-thin">
+                <div className="flex items-center gap-1 mr-1">
+                  <LayoutTemplate className="size-3 text-white/40" />
+                  <span className="text-[10px] text-white/40 whitespace-nowrap">Templates</span>
+                </div>
+                {/* No Template option */}
+                <button
+                  onClick={() => selectTemplate(null)}
+                  className={`shrink-0 flex flex-col items-center gap-1 rounded-xl p-1.5 w-14 transition-all duration-150 cursor-pointer ${
+                    !selectedTemplate
+                      ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-black bg-white/20'
+                      : 'hover:bg-white/10 bg-transparent'
+                  }`}
+                >
+                  <div className="size-8 rounded-lg overflow-hidden flex items-center justify-center border border-white/20 bg-stone-700">
+                    <X className="size-3 text-white/60" />
+                  </div>
+                  <span className="text-[9px] leading-tight text-white/60 truncate w-full text-center">
+                    None
+                  </span>
+                </button>
+                {/* Template thumbnails */}
+                {templates.map((tpl) => {
+                  const isActive = selectedTemplate?.id === tpl.id
+                  return (
+                    <button
+                      key={tpl.id}
+                      onClick={() => selectTemplate(tpl)}
+                      className={`shrink-0 flex flex-col items-center gap-1 rounded-xl p-1.5 w-14 transition-all duration-150 cursor-pointer ${
+                        isActive
+                          ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-black bg-white/20'
+                          : 'hover:bg-white/10 bg-transparent'
+                      }`}
+                      title={`${tpl.name}${tpl.captureMode === 'auto' ? ' (Auto)' : ''}`}
+                    >
+                      <div className="size-8 rounded-lg overflow-hidden flex items-center justify-center border border-white/20 bg-stone-700 relative">
+                        {tpl.stripImageUrl ? (
+                          <img
+                            src={tpl.stripImageUrl}
+                            alt={tpl.name}
+                            className="absolute inset-0.5 size-7 object-cover rounded"
+                          />
+                        ) : (
+                          <LayoutTemplate className="size-4 text-white/60" />
+                        )}
+                        {tpl.captureMode === 'auto' && (
+                          <div className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-amber-400 border border-black" />
+                        )}
+                      </div>
+                      <span className="text-[9px] leading-tight text-white/60 truncate w-full text-center">
+                        {tpl.name}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
 
               {/* Background strip */}
@@ -1083,7 +1893,6 @@ export default function LiveDisplay() {
                 </div>
               )}
 
-              {/* Selected photo preview */}
               {selectedPhoto && (
                 <div className="mt-3 flex items-center gap-3 p-3 rounded-lg bg-white/5">
                   <img
@@ -1122,6 +1931,146 @@ export default function LiveDisplay() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Composite Result Modal ── */}
+      <Dialog open={showComposite} onOpenChange={setShowComposite}>
+        <DialogContent className="bg-stone-950 border-white/10 text-white max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">Photo Strip Ready!</DialogTitle>
+            <DialogDescription className="text-stone-400">
+              Your photo strip has been generated. Download, print, or email it.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Composite image preview */}
+          {compositeImage && (
+            <div className="rounded-lg overflow-hidden border border-white/10 bg-stone-900">
+              <img
+                src={compositeImage}
+                alt="Photo strip composite"
+                className="w-full h-auto max-h-[50vh] object-contain"
+              />
+            </div>
+          )}
+
+          {/* Boomerang preview */}
+          {boomerangUrl && (
+            <div className="rounded-lg overflow-hidden border border-white/10 bg-stone-900 mt-2">
+              <video
+                src={boomerangUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-auto max-h-[30vh] object-contain"
+              />
+              <p className="text-center text-xs text-stone-400 py-1">Boomerang</p>
+            </div>
+          )}
+
+          {/* Email input (shown if auto-email needs it) */}
+          {showEmailInput && (
+            <div className="flex items-center gap-2 mt-2">
+              <Input
+                type="email"
+                placeholder="Enter email address"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                className="h-9 text-sm bg-white/10 border-white/20 text-white placeholder:text-white/40"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && guestEmail.trim() && compositeImage) {
+                    handleEmail(guestEmail.trim(), compositeImage)
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (guestEmail.trim() && compositeImage) {
+                    handleEmail(guestEmail.trim(), compositeImage)
+                  }
+                }}
+                disabled={!guestEmail.trim() || sendingEmail}
+                className="h-9 gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+              >
+                <Send className="size-3" />
+                {sendingEmail ? 'Sending...' : 'Send'}
+              </Button>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2 mt-2">
+            <Button
+              size="sm"
+              onClick={downloadComposite}
+              className="gap-1.5 bg-white text-black hover:bg-stone-200"
+            >
+              <Download className="size-4" />
+              Download
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handlePrint()}
+              disabled={printingPhoto}
+              className="gap-1.5 bg-stone-700 hover:bg-stone-600 text-white"
+            >
+              <Printer className="size-4" />
+              {printingPhoto ? 'Printing...' : 'Print'}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (guestEmail.trim() && compositeImage) {
+                  handleEmail(guestEmail.trim(), compositeImage)
+                } else {
+                  setShowEmailInput(true)
+                }
+              }}
+              disabled={sendingEmail}
+              className="gap-1.5 bg-stone-700 hover:bg-stone-600 text-white"
+            >
+              <Mail className="size-4" />
+              {sendingEmail ? 'Sending...' : 'Email'}
+            </Button>
+            <Button
+              size="sm"
+              onClick={retakePhotos}
+              variant="outline"
+              className="gap-1.5 border-white/20 text-white hover:bg-white/10"
+            >
+              <RefreshCw className="size-4" />
+              Retake
+            </Button>
+          </div>
+
+          {/* Template info badges */}
+          {selectedTemplate && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {selectedTemplate.captureMode === 'auto' && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Auto-Capture
+                </span>
+              )}
+              {selectedTemplate.includeGif && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Boomerang
+                </span>
+              )}
+              {selectedTemplate.printAuto && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  Auto-Print
+                </span>
+              )}
+              {selectedTemplate.emailAuto && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Auto-Email
+                </span>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

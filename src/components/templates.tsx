@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
@@ -12,10 +12,22 @@ import {
   X,
   Pencil,
   Frame,
-  Layers,
-  Settings2,
   CheckCircle2,
   XCircle,
+  Upload,
+  ImageIcon,
+  Trash2,
+  Copy,
+  GripVertical,
+  Timer,
+  Camera,
+  Printer,
+  Mail,
+  Move,
+  ZoomIn,
+  LayoutGrid,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -27,6 +39,8 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Slider } from '@/components/ui/slider'
 import {
   Dialog,
   DialogContent,
@@ -42,17 +56,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
-// Types
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface Placeholder {
+  x: number       // percentage 0-100
+  y: number       // percentage 0-100
+  width: number   // percentage 0-100
+  height: number  // percentage 0-100
+  borderRadius: number // px
+}
+
 interface TemplateItem {
   id: string
   eventId: string
   name: string
   description: string | null
+  stripImageUrl: string | null
   frameUrl: string | null
   overlayUrl: string | null
-  settings: string | null
+  placeholders: string | null
+  layout: string | null
+  captureMode: string | null
+  captureDelay: number | null
+  includeGif: boolean
+  printAuto: boolean
+  emailAuto: boolean
   active: boolean
+  settings: string | null
   createdAt: string
   updatedAt: string
   event: { id: string; name: string }
@@ -67,9 +108,14 @@ interface TemplateFormData {
   eventId: string
   name: string
   description: string
-  frameUrl: string
-  overlayUrl: string
-  settings: string
+  stripImageUrl: string
+  placeholders: Placeholder[]
+  layout: string
+  captureMode: string
+  captureDelay: number
+  includeGif: boolean
+  printAuto: boolean
+  emailAuto: boolean
   active: boolean
 }
 
@@ -77,11 +123,397 @@ const emptyForm: TemplateFormData = {
   eventId: '',
   name: '',
   description: '',
-  frameUrl: '',
-  overlayUrl: '',
-  settings: '',
+  stripImageUrl: '',
+  placeholders: [],
+  layout: '',
+  captureMode: 'manual',
+  captureDelay: 3,
+  includeGif: false,
+  printAuto: false,
+  emailAuto: false,
   active: true,
 }
+
+// ── Layout Presets ──────────────────────────────────────────────────────────
+
+const LAYOUT_PRESETS: Record<string, { label: string; cols: number; rows: number; icon: string }> = {
+  '1x2': { label: '1×2', cols: 1, rows: 2, icon: '⬜⬜' },
+  '2x2': { label: '2×2', cols: 2, rows: 2, icon: '⬜⬜\n⬜⬜' },
+  '1x3': { label: '1×3', cols: 1, rows: 3, icon: '⬜\n⬜\n⬜' },
+  '2x3': { label: '2×3', cols: 2, rows: 3, icon: '⬜⬜\n⬜⬜\n⬜⬜' },
+  '1x4': { label: '1×4', cols: 1, rows: 4, icon: '⬜\n⬜\n⬜\n⬜' },
+  '3x2': { label: '3×2', cols: 3, rows: 2, icon: '⬜⬜⬜\n⬜⬜⬜' },
+}
+
+function generatePlaceholdersFromLayout(layoutKey: string): Placeholder[] {
+  const preset = LAYOUT_PRESETS[layoutKey]
+  if (!preset) return []
+
+  const margin = 5 // 5% margin
+  const gap = 3    // 3% gap between placeholders
+  const totalWidth = 100 - margin * 2
+  const totalHeight = 100 - margin * 2
+
+  const cellW = (totalWidth - gap * (preset.cols - 1)) / preset.cols
+  const cellH = (totalHeight - gap * (preset.rows - 1)) / preset.rows
+
+  const placeholders: Placeholder[] = []
+  for (let r = 0; r < preset.rows; r++) {
+    for (let c = 0; c < preset.cols; c++) {
+      placeholders.push({
+        x: margin + c * (cellW + gap),
+        y: margin + r * (cellH + gap),
+        width: cellW,
+        height: cellH,
+        borderRadius: 4,
+      })
+    }
+  }
+  return placeholders
+}
+
+// ── Visual Layout Icon Component ────────────────────────────────────────────
+
+function LayoutPresetIcon({ cols, rows }: { cols: number; rows: number }) {
+  return (
+    <div className="grid gap-[2px] p-1" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+      {Array.from({ length: cols * rows }).map((_, i) => (
+        <div
+          key={i}
+          className="w-3 h-3 rounded-[2px] border border-current"
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── Draggable Placeholder Canvas ────────────────────────────────────────────
+
+function PlaceholderCanvas({
+  stripImageUrl,
+  placeholders,
+  selectedPlaceholder,
+  onSelectPlaceholder,
+  onUpdatePlaceholders,
+}: {
+  stripImageUrl: string
+  placeholders: Placeholder[]
+  selectedPlaceholder: number | null
+  onSelectPlaceholder: (index: number | null) => void
+  onUpdatePlaceholders: (placeholders: Placeholder[]) => void
+}) {
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const dragState = useRef<{
+    type: 'move' | 'resize'
+    index: number
+    startX: number
+    startY: number
+    origPlaceholder: Placeholder
+    corner?: string
+  } | null>(null)
+
+  const getPercentage = useCallback((clientX: number, clientY: number) => {
+    if (!canvasRef.current) return { x: 0, y: 0 }
+    const rect = canvasRef.current.getBoundingClientRect()
+    return {
+      x: Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)),
+    }
+  }, [])
+
+  const handleMouseDown = useCallback((
+    e: React.MouseEvent,
+    index: number,
+    type: 'move' | 'resize',
+    corner?: string
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onSelectPlaceholder(index)
+    dragState.current = {
+      type,
+      index,
+      startX: e.clientX,
+      startY: e.clientY,
+      origPlaceholder: { ...placeholders[index] },
+      corner,
+    }
+  }, [placeholders, onSelectPlaceholder])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragState.current) return
+      const { type, index, origPlaceholder, corner } = dragState.current
+      const delta = getPercentage(e.clientX, e.clientY)
+      const startDelta = getPercentage(dragState.current.startX, dragState.current.startY)
+      const dx = delta.x - startDelta.x
+      const dy = delta.y - startDelta.y
+
+      const updated = [...placeholders]
+
+      if (type === 'move') {
+        updated[index] = {
+          ...origPlaceholder,
+          x: Math.max(0, Math.min(100 - origPlaceholder.width, origPlaceholder.x + dx)),
+          y: Math.max(0, Math.min(100 - origPlaceholder.height, origPlaceholder.y + dy)),
+        }
+      } else if (type === 'resize' && corner) {
+        let newX = origPlaceholder.x
+        let newY = origPlaceholder.y
+        let newW = origPlaceholder.width
+        let newH = origPlaceholder.height
+
+        if (corner.includes('e')) {
+          newW = Math.max(5, Math.min(100 - origPlaceholder.x, origPlaceholder.width + dx))
+        }
+        if (corner.includes('w')) {
+          newX = Math.max(0, origPlaceholder.x + dx)
+          newW = Math.max(5, origPlaceholder.width - dx)
+          if (newX + newW > 100) newW = 100 - newX
+        }
+        if (corner.includes('s')) {
+          newH = Math.max(5, Math.min(100 - origPlaceholder.y, origPlaceholder.height + dy))
+        }
+        if (corner.includes('n')) {
+          newY = Math.max(0, origPlaceholder.y + dy)
+          newH = Math.max(5, origPlaceholder.height - dy)
+          if (newY + newH > 100) newH = 100 - newY
+        }
+
+        updated[index] = { ...origPlaceholder, x: newX, y: newY, width: newW, height: newH }
+      }
+
+      onUpdatePlaceholders(updated)
+    }
+
+    const handleMouseUp = () => {
+      dragState.current = null
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [placeholders, getPercentage, onUpdatePlaceholders])
+
+  const handleCanvasClick = useCallback((e: React.MouseEvent) => {
+    if (e.target === canvasRef.current) {
+      onSelectPlaceholder(null)
+    }
+  }, [onSelectPlaceholder])
+
+  // Touch support
+  const handleTouchStart = useCallback((
+    e: React.TouchEvent,
+    index: number,
+    type: 'move' | 'resize',
+    corner?: string
+  ) => {
+    e.stopPropagation()
+    const touch = e.touches[0]
+    onSelectPlaceholder(index)
+    dragState.current = {
+      type,
+      index,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      origPlaceholder: { ...placeholders[index] },
+      corner,
+    }
+  }, [placeholders, onSelectPlaceholder])
+
+  useEffect(() => {
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!dragState.current) return
+      const touch = e.touches[0]
+      const { type, index, origPlaceholder, corner } = dragState.current
+      const delta = getPercentage(touch.clientX, touch.clientY)
+      const startDelta = getPercentage(dragState.current.startX, dragState.current.startY)
+      const dx = delta.x - startDelta.x
+      const dy = delta.y - startDelta.y
+
+      const updated = [...placeholders]
+
+      if (type === 'move') {
+        updated[index] = {
+          ...origPlaceholder,
+          x: Math.max(0, Math.min(100 - origPlaceholder.width, origPlaceholder.x + dx)),
+          y: Math.max(0, Math.min(100 - origPlaceholder.height, origPlaceholder.y + dy)),
+        }
+      } else if (type === 'resize' && corner) {
+        let newX = origPlaceholder.x
+        let newY = origPlaceholder.y
+        let newW = origPlaceholder.width
+        let newH = origPlaceholder.height
+
+        if (corner.includes('e')) {
+          newW = Math.max(5, Math.min(100 - origPlaceholder.x, origPlaceholder.width + dx))
+        }
+        if (corner.includes('w')) {
+          newX = Math.max(0, origPlaceholder.x + dx)
+          newW = Math.max(5, origPlaceholder.width - dx)
+          if (newX + newW > 100) newW = 100 - newX
+        }
+        if (corner.includes('s')) {
+          newH = Math.max(5, Math.min(100 - origPlaceholder.y, origPlaceholder.height + dy))
+        }
+        if (corner.includes('n')) {
+          newY = Math.max(0, origPlaceholder.y + dy)
+          newH = Math.max(5, origPlaceholder.height - dy)
+          if (newY + newH > 100) newH = 100 - newY
+        }
+
+        updated[index] = { ...origPlaceholder, x: newX, y: newY, width: newW, height: newH }
+      }
+
+      onUpdatePlaceholders(updated)
+    }
+
+    const handleTouchEnd = () => {
+      dragState.current = null
+    }
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false })
+    window.addEventListener('touchend', handleTouchEnd)
+    return () => {
+      window.removeEventListener('touchmove', handleTouchMove)
+      window.removeEventListener('touchend', handleTouchEnd)
+    }
+  }, [placeholders, getPercentage, onUpdatePlaceholders])
+
+  return (
+    <div
+      ref={canvasRef}
+      className="relative w-full border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
+      style={{ aspectRatio: '2/3' }}
+      onClick={handleCanvasClick}
+    >
+      {/* Strip Image Background */}
+      {stripImageUrl ? (
+        <img
+          src={stripImageUrl}
+          alt="Strip design"
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          draggable={false}
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center text-muted-foreground/50">
+            <ImageIcon className="size-12 mx-auto mb-2" />
+            <p className="text-sm">Upload a strip design</p>
+          </div>
+        </div>
+      )}
+
+      {/* Placeholders */}
+      {placeholders.map((p, i) => (
+        <div
+          key={i}
+          className={`absolute group ${
+            selectedPlaceholder === i
+              ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-transparent'
+              : 'hover:ring-2 hover:ring-emerald-500/50'
+          }`}
+          style={{
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            width: `${p.width}%`,
+            height: `${p.height}%`,
+          }}
+          onMouseDown={(e) => handleMouseDown(e, i, 'move')}
+          onTouchStart={(e) => handleTouchStart(e, i, 'move')}
+        >
+          {/* Placeholder body */}
+          <div
+            className="w-full h-full border-2 border-dashed border-emerald-500/70 bg-emerald-500/10 rounded-md flex items-center justify-center cursor-move select-none"
+            style={{ borderRadius: `${p.borderRadius}px` }}
+          >
+            <span className="text-emerald-600 dark:text-emerald-400 font-bold text-lg drop-shadow-sm">
+              {i + 1}
+            </span>
+          </div>
+
+          {/* Resize handles - only show when selected */}
+          {selectedPlaceholder === i && (
+            <>
+              {/* NW */}
+              <div
+                className="absolute -top-1 -left-1 w-3 h-3 bg-emerald-500 rounded-full cursor-nw-resize z-10"
+                onMouseDown={(e) => handleMouseDown(e, i, 'resize', 'nw')}
+                onTouchStart={(e) => handleTouchStart(e, i, 'resize', 'nw')}
+              />
+              {/* NE */}
+              <div
+                className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full cursor-ne-resize z-10"
+                onMouseDown={(e) => handleMouseDown(e, i, 'resize', 'ne')}
+                onTouchStart={(e) => handleTouchStart(e, i, 'resize', 'ne')}
+              />
+              {/* SW */}
+              <div
+                className="absolute -bottom-1 -left-1 w-3 h-3 bg-emerald-500 rounded-full cursor-sw-resize z-10"
+                onMouseDown={(e) => handleMouseDown(e, i, 'resize', 'sw')}
+                onTouchStart={(e) => handleTouchStart(e, i, 'resize', 'sw')}
+              />
+              {/* SE */}
+              <div
+                className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full cursor-se-resize z-10"
+                onMouseDown={(e) => handleMouseDown(e, i, 'resize', 'se')}
+                onTouchStart={(e) => handleTouchStart(e, i, 'resize', 'se')}
+              />
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Mini Template Preview ───────────────────────────────────────────────────
+
+function MiniTemplatePreview({ template }: { template: TemplateItem }) {
+  const placeholders: Placeholder[] = template.placeholders
+    ? (() => {
+        try { return JSON.parse(template.placeholders) } catch { return [] }
+      })()
+    : []
+  const imageUrl = template.stripImageUrl || template.frameUrl
+
+  return (
+    <div
+      className="relative w-full bg-muted/50 rounded-md overflow-hidden"
+      style={{ aspectRatio: '2/3' }}
+    >
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={template.name}
+          className="absolute inset-0 w-full h-full object-contain"
+          draggable={false}
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Frame className="size-8 text-muted-foreground/40" />
+        </div>
+      )}
+      {placeholders.map((p, i) => (
+        <div
+          key={i}
+          className="absolute border border-emerald-500/50 bg-emerald-500/10 rounded-[2px]"
+          style={{
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            width: `${p.width}%`,
+            height: `${p.height}%`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── Main Templates Page ─────────────────────────────────────────────────────
 
 export default function TemplatesPage() {
   const queryClient = useQueryClient()
@@ -93,12 +525,18 @@ export default function TemplatesPage() {
   // State
   const [page, setPage] = useState(1)
   const [filterEventId, setFilterEventId] = useState<string>('all')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
-  const [editingTemplate, setEditingTemplate] = useState<TemplateItem | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
   const [form, setForm] = useState<TemplateFormData>(emptyForm)
+  const [currentStep, setCurrentStep] = useState(1)
+  const [selectedPlaceholder, setSelectedPlaceholder] = useState<number | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch templates - scoped to org
+  // Fetch templates
   const { data: templatesData, isLoading, isError, refetch: refetchTemplates } = useQuery({
     queryKey: ['templates', page, filterEventId, currentRole, currentOrgId],
     queryFn: async () => {
@@ -114,7 +552,7 @@ export default function TemplatesPage() {
     retry: 2,
   })
 
-  // Fetch events for filters and forms - scoped to org
+  // Fetch events
   const { data: eventsData } = useQuery({
     queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: async () => {
@@ -143,12 +581,15 @@ export default function TemplatesPage() {
           eventId: data.eventId,
           name: data.name,
           description: data.description || null,
-          frameUrl: data.frameUrl || null,
-          overlayUrl: data.overlayUrl || null,
-          settings: data.settings ? (isValidJson(data.settings) ? JSON.parse(data.settings) : data.settings) : null,
+          stripImageUrl: data.stripImageUrl || null,
+          placeholders: data.placeholders,
+          layout: data.layout || null,
+          captureMode: data.captureMode,
+          captureDelay: data.captureDelay,
+          includeGif: data.includeGif,
+          printAuto: data.printAuto,
+          emailAuto: data.emailAuto,
           active: data.active,
-          userRole: currentRole,
-          userOrgId: currentOrgId,
         }),
       })
       const json = await res.json()
@@ -158,8 +599,7 @@ export default function TemplatesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
       toast.success('Template created', { description: 'The template has been created successfully.' })
-      setForm(emptyForm)
-      setCreateOpen(false)
+      closeDialog()
     },
     onError: (err: Error) => {
       toast.error('Error', { description: err.message })
@@ -168,16 +608,21 @@ export default function TemplatesPage() {
 
   // Update mutation
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<TemplateFormData> }) => {
+    mutationFn: async ({ id, data }: { id: string; data: TemplateFormData }) => {
       const res = await fetch(`/api/templates/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: data.name,
           description: data.description || null,
-          frameUrl: data.frameUrl || null,
-          overlayUrl: data.overlayUrl || null,
-          settings: data.settings ? (isValidJson(data.settings) ? JSON.parse(data.settings) : data.settings) : null,
+          stripImageUrl: data.stripImageUrl || null,
+          placeholders: data.placeholders,
+          layout: data.layout || null,
+          captureMode: data.captureMode,
+          captureDelay: data.captureDelay,
+          includeGif: data.includeGif,
+          printAuto: data.printAuto,
+          emailAuto: data.emailAuto,
           active: data.active,
         }),
       })
@@ -188,58 +633,219 @@ export default function TemplatesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
       toast.success('Template updated', { description: 'The template has been updated successfully.' })
-      setForm(emptyForm)
-      setEditOpen(false)
-      setEditingTemplate(null)
+      closeDialog()
     },
     onError: (err: Error) => {
       toast.error('Error', { description: err.message })
     },
   })
 
-  function isValidJson(str: string): boolean {
-    try {
-      JSON.parse(str)
-      return true
-    } catch {
-      return false
-    }
+  // Toggle active mutation
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const res = await fetch(`/api/templates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Failed to update template')
+      return json
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] })
+      toast.success('Status updated')
+    },
+    onError: (err: Error) => {
+      toast.error('Error', { description: err.message })
+    },
+  })
+
+  // Duplicate mutation
+  const duplicateMutation = useMutation({
+    mutationFn: async (template: TemplateItem) => {
+      const res = await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: template.eventId,
+          name: `${template.name} (Copy)`,
+          description: template.description,
+          stripImageUrl: template.stripImageUrl,
+          placeholders: template.placeholders,
+          layout: template.layout,
+          captureMode: template.captureMode || 'manual',
+          captureDelay: template.captureDelay || 3,
+          includeGif: template.includeGif,
+          printAuto: template.printAuto,
+          emailAuto: template.emailAuto,
+          active: true,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Failed to duplicate template')
+      return json
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] })
+      toast.success('Template duplicated')
+    },
+    onError: (err: Error) => {
+      toast.error('Error', { description: err.message })
+    },
+  })
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Failed to delete template')
+      return json
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] })
+      toast.success('Template deleted')
+      setDeleteDialogOpen(false)
+      setDeletingTemplateId(null)
+    },
+    onError: (err: Error) => {
+      toast.error('Error', { description: err.message })
+    },
+  })
+
+  // ── Handlers ────────────────────────────────────────────────────────────
+
+  function closeDialog() {
+    setDialogOpen(false)
+    setIsEditing(false)
+    setEditingTemplateId(null)
+    setForm(emptyForm)
+    setCurrentStep(1)
+    setSelectedPlaceholder(null)
+  }
+
+  function openCreate() {
+    setForm(emptyForm)
+    setIsEditing(false)
+    setEditingTemplateId(null)
+    setCurrentStep(1)
+    setSelectedPlaceholder(null)
+    setDialogOpen(true)
   }
 
   function openEdit(template: TemplateItem) {
-    setEditingTemplate(template)
+    const parsedPlaceholders: Placeholder[] = template.placeholders
+      ? (() => { try { return JSON.parse(template.placeholders) } catch { return [] } })()
+      : []
+
     setForm({
       eventId: template.eventId,
       name: template.name,
       description: template.description || '',
-      frameUrl: template.frameUrl || '',
-      overlayUrl: template.overlayUrl || '',
-      settings: template.settings || '',
+      stripImageUrl: template.stripImageUrl || template.frameUrl || '',
+      placeholders: parsedPlaceholders,
+      layout: template.layout || '',
+      captureMode: template.captureMode || 'manual',
+      captureDelay: template.captureDelay || 3,
+      includeGif: template.includeGif,
+      printAuto: template.printAuto,
+      emailAuto: template.emailAuto,
       active: template.active,
     })
-    setEditOpen(true)
+    setIsEditing(true)
+    setEditingTemplateId(template.id)
+    setCurrentStep(1)
+    setSelectedPlaceholder(null)
+    setDialogOpen(true)
   }
 
-  function handleSubmit(isEdit: boolean) {
+  async function handleFileUpload(file: File) {
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Upload failed')
+
+      setForm((f) => ({ ...f, stripImageUrl: json.data.url }))
+      toast.success('Image uploaded')
+    } catch (err: any) {
+      toast.error('Upload failed', { description: err.message })
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) {
+      handleFileUpload(file)
+    }
+  }
+
+  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileUpload(file)
+    }
+  }
+
+  function handleLayoutPreset(layoutKey: string) {
+    const newPlaceholders = generatePlaceholdersFromLayout(layoutKey)
+    setForm((f) => ({
+      ...f,
+      layout: layoutKey,
+      placeholders: newPlaceholders,
+    }))
+    setSelectedPlaceholder(null)
+  }
+
+  function handleAddPlaceholder() {
+    const newPh: Placeholder = {
+      x: 10,
+      y: 10 + form.placeholders.length * 5,
+      width: 35,
+      height: 25,
+      borderRadius: 4,
+    }
+    setForm((f) => ({
+      ...f,
+      layout: 'custom',
+      placeholders: [...f.placeholders, newPh],
+    }))
+    setSelectedPlaceholder(form.placeholders.length)
+  }
+
+  function handleRemovePlaceholder(index: number) {
+    setForm((f) => ({
+      ...f,
+      layout: 'custom',
+      placeholders: f.placeholders.filter((_, i) => i !== index),
+    }))
+    setSelectedPlaceholder(null)
+  }
+
+  function handleSubmit() {
     if (!form.eventId || !form.name.trim()) {
       toast.error('Validation Error', { description: 'Event and Name are required.' })
+      setCurrentStep(1)
       return
     }
-    if (isEdit && editingTemplate) {
-      updateMutation.mutate({ id: editingTemplate.id, data: form })
+    if (isEditing && editingTemplateId) {
+      updateMutation.mutate({ id: editingTemplateId, data: form })
     } else {
       createMutation.mutate(form)
     }
   }
 
-  function tryParseSettings(settings: string | null): string {
-    if (!settings) return ''
-    try {
-      return JSON.stringify(JSON.parse(settings), null, 2)
-    } catch {
-      return settings
-    }
-  }
+  const isPending = createMutation.isPending || updateMutation.isPending
 
   // FACILITATOR: show restricted message
   if (isFacilitatorRole) {
@@ -264,7 +870,7 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
           <p className="text-muted-foreground">Design and manage photo templates for your events.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+        <Button onClick={openCreate} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4" />
           Create Template
         </Button>
@@ -289,12 +895,7 @@ export default function TemplatesPage() {
         </Select>
 
         {filterEventId !== 'all' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setFilterEventId('all'); setPage(1) }}
-            className="gap-1"
-          >
+          <Button variant="ghost" size="sm" onClick={() => { setFilterEventId('all'); setPage(1) }} className="gap-1">
             <X className="size-3" />
             Clear
           </Button>
@@ -339,8 +940,13 @@ export default function TemplatesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (
-            <Card key={template.id} className="hover:shadow-md transition-shadow border-l-4 border-l-emerald-500">
-              <CardHeader className="pb-3">
+            <Card key={template.id} className="hover:shadow-md transition-shadow border-l-4 border-l-emerald-500 overflow-hidden">
+              {/* Preview */}
+              <div className="px-4 pt-4">
+                <MiniTemplatePreview template={template} />
+              </div>
+
+              <CardHeader className="pb-2 pt-3">
                 <div className="flex items-start justify-between">
                   <div className="space-y-1 min-w-0 flex-1">
                     <CardTitle className="text-base truncate">{template.name}</CardTitle>
@@ -359,38 +965,86 @@ export default function TemplatesPage() {
                   </Badge>
                 </div>
               </CardHeader>
+
               <CardContent className="space-y-3">
                 {template.description && (
                   <p className="text-sm text-muted-foreground line-clamp-2">{template.description}</p>
                 )}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {template.frameUrl && (
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Frame className="size-3 shrink-0" />
-                      <span className="truncate">Frame</span>
-                    </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {template.layout && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <LayoutGrid className="size-3" />
+                      {template.layout}
+                    </Badge>
                   )}
-                  {template.overlayUrl && (
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Layers className="size-3 shrink-0" />
-                      <span className="truncate">Overlay</span>
-                    </div>
+                  {template.captureMode === 'auto' && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Timer className="size-3" />
+                      Auto {template.captureDelay}s
+                    </Badge>
                   )}
-                  {template.settings && (
-                    <div className="flex items-center gap-1.5 text-muted-foreground col-span-2">
-                      <Settings2 className="size-3 shrink-0" />
-                      <span className="truncate">{isValidJson(template.settings) ? 'JSON Settings' : template.settings}</span>
-                    </div>
+                  {template.includeGif && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Camera className="size-3" />
+                      GIF
+                    </Badge>
+                  )}
+                  {template.printAuto && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Printer className="size-3" />
+                      Auto Print
+                    </Badge>
+                  )}
+                  {template.emailAuto && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Mail className="size-3" />
+                      Auto Email
+                    </Badge>
                   )}
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t">
                   <span className="text-xs text-muted-foreground">
                     {format(new Date(template.createdAt), 'MMM d, yyyy')}
                   </span>
-                  <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => openEdit(template)}>
-                    <Pencil className="size-3" />
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-7 text-xs"
+                      onClick={() => openEdit(template)}
+                    >
+                      <Pencil className="size-3" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-7 text-xs"
+                      onClick={() => duplicateMutation.mutate(template)}
+                      disabled={duplicateMutation.isPending}
+                    >
+                      <Copy className="size-3" />
+                      Copy
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-7 text-xs"
+                      onClick={() => toggleActiveMutation.mutate({ id: template.id, active: !template.active })}
+                      disabled={toggleActiveMutation.isPending}
+                    >
+                      {template.active ? <XCircle className="size-3" /> : <CheckCircle2 className="size-3" />}
+                      {template.active ? 'Deactivate' : 'Activate'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-7 text-xs text-destructive hover:text-destructive"
+                      onClick={() => { setDeletingTemplateId(template.id); setDeleteDialogOpen(true) }}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -401,197 +1055,526 @@ export default function TemplatesPage() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
             Previous
           </Button>
           <span className="text-sm text-muted-foreground">
             Page {page} of {totalPages}
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
             Next
           </Button>
         </div>
       )}
 
-      {/* Create Template Dialog */}
-      <Dialog open={createOpen} onOpenChange={(open) => { if (!open) setForm(emptyForm); setCreateOpen(open) }}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Create Template</DialogTitle>
-            <DialogDescription>Add a new photo template for an event.</DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[70vh]">
-            <div className="grid gap-4 py-4 px-1">
-              <div className="grid gap-2">
-                <Label>Event *</Label>
-                <Select value={form.eventId} onValueChange={(val) => setForm((f) => ({ ...f, eventId: val }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select an event" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {events.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="create-name">Name *</Label>
-                <Input
-                  id="create-name"
-                  placeholder="Template name"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="create-desc">Description</Label>
-                <Textarea
-                  id="create-desc"
-                  placeholder="Template description"
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  rows={2}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="create-frame">Frame URL</Label>
-                <Input
-                  id="create-frame"
-                  placeholder="https://example.com/frame.png"
-                  value={form.frameUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, frameUrl: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="create-overlay">Overlay URL</Label>
-                <Input
-                  id="create-overlay"
-                  placeholder="https://example.com/overlay.png"
-                  value={form.overlayUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, overlayUrl: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="create-settings">Settings (JSON or text)</Label>
-                <Textarea
-                  id="create-settings"
-                  placeholder='{"layout": "2x2", "borderColor": "#fff"}'
-                  value={form.settings}
-                  onChange={(e) => setForm((f) => ({ ...f, settings: e.target.value }))}
-                  rows={3}
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="create-active">Active</Label>
-                <Switch
-                  id="create-active"
-                  checked={form.active}
-                  onCheckedChange={(val) => setForm((f) => ({ ...f, active: val }))}
-                />
-              </div>
-            </div>
-          </ScrollArea>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setForm(emptyForm); setCreateOpen(false) }}>
-              Cancel
-            </Button>
-            <Button onClick={() => handleSubmit(false)} disabled={createMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
-              {createMutation.isPending ? 'Creating...' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Template</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this template? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingTemplateId && deleteMutation.mutate(deletingTemplateId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* Edit Template Dialog */}
-      <Dialog open={editOpen} onOpenChange={(open) => { if (!open) { setForm(emptyForm); setEditingTemplate(null) }; setEditOpen(open) }}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Edit Template</DialogTitle>
-            <DialogDescription>Update the template details.</DialogDescription>
+      {/* Create/Edit Template Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); else setDialogOpen(true) }}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] p-0">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle>{isEditing ? 'Edit Template' : 'Create Template'}</DialogTitle>
+            <DialogDescription>
+              {isEditing ? 'Update your photo template design and settings.' : 'Design a new photo template with visual editor.'}
+            </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[70vh]">
-            <div className="grid gap-4 py-4 px-1">
-              <div className="grid gap-2">
-                <Label>Event</Label>
-                <Input value={editingTemplate?.event.name || ''} disabled />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-name">Name *</Label>
-                <Input
-                  id="edit-name"
-                  placeholder="Template name"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-desc">Description</Label>
-                <Textarea
-                  id="edit-desc"
-                  placeholder="Template description"
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  rows={2}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-frame">Frame URL</Label>
-                <Input
-                  id="edit-frame"
-                  placeholder="https://example.com/frame.png"
-                  value={form.frameUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, frameUrl: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-overlay">Overlay URL</Label>
-                <Input
-                  id="edit-overlay"
-                  placeholder="https://example.com/overlay.png"
-                  value={form.overlayUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, overlayUrl: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-settings">Settings (JSON or text)</Label>
-                <Textarea
-                  id="edit-settings"
-                  placeholder='{"layout": "2x2", "borderColor": "#fff"}'
-                  value={form.settings}
-                  onChange={(e) => setForm((f) => ({ ...f, settings: e.target.value }))}
-                  rows={3}
-                  className="font-mono text-sm"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="edit-active">Active</Label>
-                <Switch
-                  id="edit-active"
-                  checked={form.active}
-                  onCheckedChange={(val) => setForm((f) => ({ ...f, active: val }))}
-                />
-              </div>
+
+          {/* Step Indicator */}
+          <div className="px-6 pt-4">
+            <div className="flex items-center gap-2">
+              {[
+                { step: 1, label: 'Basic Info' },
+                { step: 2, label: 'Strip Design' },
+                { step: 3, label: 'Layout' },
+                { step: 4, label: 'Capture' },
+              ].map((s, i) => (
+                <div key={s.step} className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentStep(s.step)}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                      currentStep === s.step
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                        : currentStep > s.step
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {currentStep > s.step ? (
+                      <CheckCircle2 className="size-3.5" />
+                    ) : (
+                      <span className="size-4 rounded-full border border-current flex items-center justify-center text-[10px]">
+                        {s.step}
+                      </span>
+                    )}
+                    <span className="hidden sm:inline">{s.label}</span>
+                  </button>
+                  {i < 3 && <ChevronRight className="size-3 text-muted-foreground/50" />}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <ScrollArea className="max-h-[60vh] px-6">
+            <div className="py-4 space-y-5">
+              {/* Step 1: Basic Info */}
+              {currentStep === 1 && (
+                <div className="space-y-4">
+                  <div className="grid gap-2">
+                    <Label>Event *</Label>
+                    <Select value={form.eventId} onValueChange={(val) => setForm((f) => ({ ...f, eventId: val }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select an event" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {events.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="tpl-name">Template Name *</Label>
+                    <Input
+                      id="tpl-name"
+                      placeholder="e.g. Graduation 2025 Strip"
+                      value={form.name}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="tpl-desc">Description</Label>
+                    <Textarea
+                      id="tpl-desc"
+                      placeholder="Brief description of this template..."
+                      value={form.description}
+                      onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                      rows={2}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tpl-active">Active</Label>
+                    <Switch
+                      id="tpl-active"
+                      checked={form.active}
+                      onCheckedChange={(val) => setForm((f) => ({ ...f, active: val }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Strip Design */}
+              {currentStep === 2 && (
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-base font-semibold">Strip Design Image</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Upload the background/frame image for your photo strip. This is the decorative border that photos will be placed on.
+                    </p>
+                  </div>
+
+                  {form.stripImageUrl ? (
+                    <div className="space-y-3">
+                      <div className="relative rounded-lg overflow-hidden border bg-muted/30">
+                        <img
+                          src={form.stripImageUrl}
+                          alt="Strip design"
+                          className="w-full object-contain"
+                          style={{ maxHeight: '300px' }}
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-2 right-2 gap-1"
+                          onClick={() => setForm((f) => ({ ...f, stripImageUrl: '' }))}
+                        >
+                          <X className="size-3" />
+                          Remove
+                        </Button>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                      >
+                        <Upload className="size-3" />
+                        {uploading ? 'Uploading...' : 'Replace Image'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div
+                      className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                      onDrop={handleDrop}
+                      onDragOver={(e) => e.preventDefault()}
+                    >
+                      <Upload className="size-10 mx-auto text-muted-foreground/50 mb-3" />
+                      <p className="text-sm font-medium">Click or drag & drop to upload</p>
+                      <p className="text-xs text-muted-foreground mt-1">PNG, JPG, WebP up to 10MB</p>
+                      {uploading && (
+                        <div className="mt-3">
+                          <div className="w-32 h-1.5 bg-muted rounded-full mx-auto overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">Uploading...</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={handleFileInput}
+                  />
+
+                  <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
+                    <p className="font-medium flex items-center gap-1.5">
+                      <ImageIcon className="size-4 text-emerald-600" />
+                      Tips for strip designs
+                    </p>
+                    <ul className="text-muted-foreground text-xs space-y-1 ml-5 list-disc">
+                      <li>Use a 2:3 aspect ratio for standard photo strips</li>
+                      <li>Leave space for photo placeholders in your design</li>
+                      <li>Use transparent PNG if you want overlays</li>
+                      <li>Common strip size: 600×900px or 1200×1800px</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Layout & Placeholders */}
+              {currentStep === 3 && (
+                <div className="space-y-5">
+                  <div>
+                    <Label className="text-base font-semibold">Photo Layout</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Choose a quick layout preset or create a custom arrangement.
+                    </p>
+                  </div>
+
+                  {/* Layout Presets */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Quick Presets</Label>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {Object.entries(LAYOUT_PRESETS).map(([key, preset]) => (
+                        <button
+                          key={key}
+                          onClick={() => handleLayoutPreset(key)}
+                          className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all ${
+                            form.layout === key
+                              ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                              : 'border-muted hover:border-emerald-500/50 hover:bg-emerald-500/5'
+                          }`}
+                        >
+                          <LayoutPresetIcon cols={preset.cols} rows={preset.rows} />
+                          <span className="text-xs font-medium">{preset.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Custom placeholder controls */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" className="gap-1" onClick={handleAddPlaceholder}>
+                      <Plus className="size-3.5" />
+                      Add Placeholder
+                    </Button>
+                    {selectedPlaceholder !== null && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1 text-destructive hover:text-destructive"
+                        onClick={() => handleRemovePlaceholder(selectedPlaceholder)}
+                      >
+                        <Trash2 className="size-3.5" />
+                        Remove #{selectedPlaceholder + 1}
+                      </Button>
+                    )}
+                    {form.placeholders.length > 0 && (
+                      <Badge variant="secondary" className="gap-1">
+                        {form.placeholders.length} photo slot{form.placeholders.length !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                    {form.layout && (
+                      <Badge variant="outline" className="gap-1">
+                        <LayoutGrid className="size-3" />
+                        {form.layout}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Visual Canvas */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium flex items-center gap-1.5">
+                      <Move className="size-4" />
+                      Visual Editor
+                      <span className="text-xs font-normal text-muted-foreground">— drag to move, corners to resize</span>
+                    </Label>
+                    <PlaceholderCanvas
+                      stripImageUrl={form.stripImageUrl}
+                      placeholders={form.placeholders}
+                      selectedPlaceholder={selectedPlaceholder}
+                      onSelectPlaceholder={setSelectedPlaceholder}
+                      onUpdatePlaceholders={(newPlaceholders) => setForm((f) => ({ ...f, placeholders: newPlaceholders }))}
+                    />
+                  </div>
+
+                  {/* Selected placeholder properties */}
+                  {selectedPlaceholder !== null && form.placeholders[selectedPlaceholder] && (
+                    <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                      <Label className="text-sm font-medium">Placeholder #{selectedPlaceholder + 1} Properties</Label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">X Position (%)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={Math.round(form.placeholders[selectedPlaceholder].x)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0
+                              const updated = [...form.placeholders]
+                              updated[selectedPlaceholder] = { ...updated[selectedPlaceholder], x: Math.max(0, Math.min(100, val)) }
+                              setForm((f) => ({ ...f, placeholders: updated }))
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Y Position (%)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={Math.round(form.placeholders[selectedPlaceholder].y)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0
+                              const updated = [...form.placeholders]
+                              updated[selectedPlaceholder] = { ...updated[selectedPlaceholder], y: Math.max(0, Math.min(100, val)) }
+                              setForm((f) => ({ ...f, placeholders: updated }))
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Width (%)</Label>
+                          <Input
+                            type="number"
+                            min={5}
+                            max={100}
+                            value={Math.round(form.placeholders[selectedPlaceholder].width)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 5
+                              const updated = [...form.placeholders]
+                              updated[selectedPlaceholder] = { ...updated[selectedPlaceholder], width: Math.max(5, Math.min(100, val)) }
+                              setForm((f) => ({ ...f, placeholders: updated }))
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Height (%)</Label>
+                          <Input
+                            type="number"
+                            min={5}
+                            max={100}
+                            value={Math.round(form.placeholders[selectedPlaceholder].height)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 5
+                              const updated = [...form.placeholders]
+                              updated[selectedPlaceholder] = { ...updated[selectedPlaceholder], height: Math.max(5, Math.min(100, val)) }
+                              setForm((f) => ({ ...f, placeholders: updated }))
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-2 space-y-1">
+                          <Label className="text-xs text-muted-foreground">Border Radius (px)</Label>
+                          <Slider
+                            min={0}
+                            max={32}
+                            step={1}
+                            value={[form.placeholders[selectedPlaceholder].borderRadius]}
+                            onValueChange={([val]) => {
+                              const updated = [...form.placeholders]
+                              updated[selectedPlaceholder] = { ...updated[selectedPlaceholder], borderRadius: val }
+                              setForm((f) => ({ ...f, placeholders: updated }))
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 4: Capture Settings */}
+              {currentStep === 4 && (
+                <div className="space-y-5">
+                  <div>
+                    <Label className="text-base font-semibold">Capture Settings</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Configure how photos are captured and processed.
+                    </p>
+                  </div>
+
+                  {/* Capture Mode */}
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">Capture Mode</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setForm((f) => ({ ...f, captureMode: 'manual' }))}
+                        className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                          form.captureMode === 'manual'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-muted hover:border-emerald-500/50'
+                        }`}
+                      >
+                        <Camera className="size-6" />
+                        <span className="text-sm font-medium">Manual</span>
+                        <span className="text-xs text-muted-foreground">Tap to capture each photo</span>
+                      </button>
+                      <button
+                        onClick={() => setForm((f) => ({ ...f, captureMode: 'auto' }))}
+                        className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                          form.captureMode === 'auto'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-muted hover:border-emerald-500/50'
+                        }`}
+                      >
+                        <Timer className="size-6" />
+                        <span className="text-sm font-medium">Auto-Sequential</span>
+                        <span className="text-xs text-muted-foreground">Captures photos automatically</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Auto Capture Delay */}
+                  {form.captureMode === 'auto' && (
+                    <div className="space-y-2 bg-muted/50 rounded-lg p-4">
+                      <Label className="text-sm font-medium flex items-center gap-1.5">
+                        <Timer className="size-4" />
+                        Delay Between Shots
+                      </Label>
+                      <div className="flex items-center gap-4">
+                        <Slider
+                          min={2}
+                          max={15}
+                          step={1}
+                          value={[form.captureDelay]}
+                          onValueChange={([val]) => setForm((f) => ({ ...f, captureDelay: val }))}
+                          className="flex-1"
+                        />
+                        <span className="text-sm font-medium tabular-nums w-12 text-right">
+                          {form.captureDelay}s
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Countdown between each photo capture
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Toggle Options */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between rounded-lg border p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-2">
+                          <Camera className="size-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Include Boomerang GIF</Label>
+                          <p className="text-xs text-muted-foreground">Capture a short boomerang clip along with photos</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={form.includeGif}
+                        onCheckedChange={(val) => setForm((f) => ({ ...f, includeGif: val }))}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-lg border p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-2">
+                          <Printer className="size-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Auto-Print</Label>
+                          <p className="text-xs text-muted-foreground">Automatically print after all photos are captured</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={form.printAuto}
+                        onCheckedChange={(val) => setForm((f) => ({ ...f, printAuto: val }))}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-lg border p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-2">
+                          <Mail className="size-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Auto-Email</Label>
+                          <p className="text-xs text-muted-foreground">Automatically email the final strip to the guest</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={form.emailAuto}
+                        onCheckedChange={(val) => setForm((f) => ({ ...f, emailAuto: val }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </ScrollArea>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setForm(emptyForm); setEditOpen(false); setEditingTemplate(null) }}>
-              Cancel
-            </Button>
-            <Button onClick={() => handleSubmit(true)} disabled={updateMutation.isPending} className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
-              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-            </Button>
+
+          <DialogFooter className="px-6 py-4 border-t">
+            <div className="flex items-center justify-between w-full">
+              <div>
+                {currentStep > 1 && (
+                  <Button variant="outline" onClick={() => setCurrentStep((s) => s - 1)} className="gap-1">
+                    <ChevronLeft className="size-4" />
+                    Back
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={closeDialog}>
+                  Cancel
+                </Button>
+                {currentStep < 4 ? (
+                  <Button onClick={() => setCurrentStep((s) => s + 1)} className="gap-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+                    Next
+                    <ChevronRight className="size-4" />
+                  </Button>
+                ) : (
+                  <Button onClick={handleSubmit} disabled={isPending} className="gap-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+                    {isPending ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Template'}
+                  </Button>
+                )}
+              </div>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

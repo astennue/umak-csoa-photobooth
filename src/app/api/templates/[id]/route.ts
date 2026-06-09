@@ -65,7 +65,15 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, description, frameUrl, overlayUrl, settings, active } = body;
+    const {
+      name, description,
+      // New fields
+      stripImageUrl, placeholders, layout,
+      captureMode, captureDelay, includeGif, printAuto, emailAuto,
+      // Legacy fields
+      frameUrl, overlayUrl, settings,
+      active,
+    } = body;
 
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       return errorResponse('Name must be a non-empty string', 400);
@@ -76,6 +84,16 @@ export async function PUT(
       data: {
         ...(name !== undefined && { name: name.trim() }),
         ...(description !== undefined && { description: description?.trim() || null }),
+        // New fields
+        ...(stripImageUrl !== undefined && { stripImageUrl: stripImageUrl?.trim() || null }),
+        ...(placeholders !== undefined && { placeholders: typeof placeholders === 'object' ? JSON.stringify(placeholders) : placeholders?.trim() || null }),
+        ...(layout !== undefined && { layout: layout?.trim() || null }),
+        ...(captureMode !== undefined && { captureMode }),
+        ...(captureDelay !== undefined && { captureDelay: typeof captureDelay === 'number' ? captureDelay : 3 }),
+        ...(includeGif !== undefined && { includeGif: typeof includeGif === 'boolean' ? includeGif : false }),
+        ...(printAuto !== undefined && { printAuto: typeof printAuto === 'boolean' ? printAuto : false }),
+        ...(emailAuto !== undefined && { emailAuto: typeof emailAuto === 'boolean' ? emailAuto : false }),
+        // Legacy fields
         ...(frameUrl !== undefined && { frameUrl: frameUrl?.trim() || null }),
         ...(overlayUrl !== undefined && { overlayUrl: overlayUrl?.trim() || null }),
         ...(settings !== undefined && { settings: typeof settings === 'object' ? JSON.stringify(settings) : settings?.trim() || null }),

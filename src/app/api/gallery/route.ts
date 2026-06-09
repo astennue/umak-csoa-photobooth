@@ -2,6 +2,55 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
 import { getAuthContext, canAccessOrg, getOrgScope } from '@/lib/auth';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
+
+/**
+ * Convert a base64 dataUrl to a Buffer and extract metadata.
+ */
+function parseDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string; extension: string } {
+  const matches = dataUrl.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
+  if (!matches) {
+    throw new Error('Invalid dataUrl format. Expected data:image/...;base64,...');
+  }
+
+  const mimeType = matches[1];
+  const base64Data = matches[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  const mimeToExt: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+  };
+  const extension = mimeToExt[mimeType] || 'png';
+
+  return { buffer, mimeType, extension };
+}
+
+/**
+ * Save a base64 dataUrl to the public/gallery folder and return the public path.
+ */
+function saveDataUrlToGallery(dataUrl: string): string {
+  const parsed = parseDataUrl(dataUrl);
+  const timestamp = Date.now();
+  const uniqueId = randomUUID().slice(0, 8);
+  const fileName = `${timestamp}-${uniqueId}.${parsed.extension}`;
+
+  const galleryDir = join(process.cwd(), 'public', 'gallery');
+  if (!existsSync(galleryDir)) {
+    mkdirSync(galleryDir, { recursive: true });
+  }
+
+  const filePath = join(galleryDir, fileName);
+  writeFileSync(filePath, parsed.buffer);
+
+  return `/gallery/${fileName}`;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -53,13 +102,36 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { eventId, sessionId, photoUrl, thumbnailUrl, caption, isPublic, isFavorite } = body;
+    const {
+      eventId,
+      sessionId,
+      photoUrl,
+      photoDataUrl,
+      thumbnailUrl,
+      caption,
+      isPublic,
+      isFavorite,
+    } = body as {
+      eventId: string;
+      sessionId?: string;
+      photoUrl?: string;
+      photoDataUrl?: string;
+      thumbnailUrl?: string;
+      caption?: string;
+      isPublic?: boolean;
+      isFavorite?: boolean;
+    };
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
     }
-    if (!photoUrl || typeof photoUrl !== 'string' || photoUrl.trim() === '') {
-      return errorResponse('Photo URL is required', 400);
+
+    // Either photoUrl or photoDataUrl must be provided
+    if (
+      (!photoUrl || typeof photoUrl !== 'string' || photoUrl.trim() === '') &&
+      (!photoDataUrl || typeof photoDataUrl !== 'string')
+    ) {
+      return errorResponse('Either photoUrl or photoDataUrl is required', 400);
     }
 
     const event = await db.event.findUnique({ where: { id: eventId } });
@@ -79,11 +151,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Determine the final photo URL
+    let finalPhotoUrl: string;
+    if (photoDataUrl && typeof photoDataUrl === 'string' && photoDataUrl.startsWith('data:')) {
+      // Save base64 dataUrl to public/gallery and use the path
+      try {
+        finalPhotoUrl = saveDataUrlToGallery(photoDataUrl);
+      } catch (saveErr: any) {
+        return errorResponse(saveErr.message || 'Failed to save photo from dataUrl', 400);
+      }
+    } else if (photoUrl && photoUrl.trim() !== '') {
+      finalPhotoUrl = photoUrl.trim();
+    } else {
+      return errorResponse('Either photoUrl or photoDataUrl is required', 400);
+    }
+
     const gallery = await db.gallery.create({
       data: {
         eventId,
         sessionId: sessionId?.trim() || null,
-        photoUrl: photoUrl.trim(),
+        photoUrl: finalPhotoUrl,
         thumbnailUrl: thumbnailUrl?.trim() || null,
         caption: caption?.trim() || null,
         isPublic: typeof isPublic === 'boolean' ? isPublic : true,

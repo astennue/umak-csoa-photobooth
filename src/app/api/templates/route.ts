@@ -53,7 +53,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { eventId, name, description, frameUrl, overlayUrl, settings, active } = body;
+    const {
+      eventId, name, description,
+      // New fields
+      stripImageUrl, placeholders, layout,
+      captureMode, captureDelay, includeGif, printAuto, emailAuto,
+      // Legacy fields (backward compat)
+      frameUrl, overlayUrl, settings,
+      active,
+    } = body;
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
@@ -77,6 +85,16 @@ export async function POST(request: NextRequest) {
         eventId,
         name: name.trim(),
         description: description?.trim() || null,
+        // New fields
+        stripImageUrl: stripImageUrl?.trim() || null,
+        placeholders: typeof placeholders === 'object' ? JSON.stringify(placeholders) : placeholders?.trim() || null,
+        layout: layout?.trim() || null,
+        captureMode: captureMode || 'manual',
+        captureDelay: typeof captureDelay === 'number' ? captureDelay : 3,
+        includeGif: typeof includeGif === 'boolean' ? includeGif : false,
+        printAuto: typeof printAuto === 'boolean' ? printAuto : false,
+        emailAuto: typeof emailAuto === 'boolean' ? emailAuto : false,
+        // Legacy fields
         frameUrl: frameUrl?.trim() || null,
         overlayUrl: overlayUrl?.trim() || null,
         settings: typeof settings === 'object' ? JSON.stringify(settings) : settings?.trim() || null,
