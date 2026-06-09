@@ -300,125 +300,132 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     []
   )
 
-  // ── Process segmentation mask ──
-  // MediaPipe's categoryMask may be a WebGL canvas, MPImage object, or typed array.
-  // We try multiple strategies to extract the pixel data, and handle both
-  // float16 (values 0/1 in uint8) and uint8 (values 0/255) mask formats.
+  // ── Process segmentation mask (async) ──
+  // Uses createImageBitmap() to force a synchronous pixel copy from WebGL canvas
+  // before the framebuffer gets cleared — the root cause of "AI Separation Failed".
   // Returns null if mask cannot be processed (signals no mask available).
-  const processMask = useCallback(
-    (categoryMask: any, width: number, height: number): HTMLCanvasElement | null => {
-      const maskCanvas = ensureOffscreenCanvas(maskCanvasRef)
-      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
-      if (!maskCtx) {
-        maskCanvasRef.current = null
-        return null
-      }
+  const processMaskAsync = useCallback(
+    async (categoryMask: any, width: number, height: number): Promise<HTMLCanvasElement | null> => {
+      try {
+        const maskCanvas = ensureOffscreenCanvas(maskCanvasRef)
+        const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
+        if (!maskCtx) {
+          maskCanvasRef.current = null
+          return null
+        }
 
-      maskCtx.clearRect(0, 0, width, height)
+        maskCtx.clearRect(0, 0, width, height)
 
-      let drawSucceeded = false
+        let drawSucceeded = false
 
-      // Strategy 1: Try categoryMask.canvas as drawable source
-      // MPImage's .canvas may be HTMLCanvasElement, OffscreenCanvas, or other drawable
-      if (!drawSucceeded && categoryMask?.canvas) {
-        try {
-          maskCtx.drawImage(categoryMask.canvas as CanvasImageSource, 0, 0, width, height)
-          drawSucceeded = true
-        } catch { /* fallthrough */ }
-      }
-
-      // Strategy 2: Try drawing categoryMask directly as CanvasImageSource
-      if (!drawSucceeded) {
-        try {
-          maskCtx.drawImage(categoryMask as CanvasImageSource, 0, 0, width, height)
-          drawSucceeded = true
-        } catch { /* fallthrough */ }
-      }
-
-      // Strategy 3: Try MPImage's getImageData() method
-      if (!drawSucceeded) {
-        try {
-          if (typeof categoryMask?.getImageData === 'function') {
-            const imgData = categoryMask.getImageData()
-            maskCtx.putImageData(imgData, 0, 0)
+        // Strategy 1: Use createImageBitmap on categoryMask.canvas — forces immediate
+        // pixel copy from WebGL canvas before framebuffer is cleared.
+        if (!drawSucceeded && categoryMask?.canvas) {
+          try {
+            const bitmap = await createImageBitmap(categoryMask.canvas)
+            maskCtx.drawImage(bitmap, 0, 0, width, height)
+            bitmap.close()
             drawSucceeded = true
-          }
-        } catch { /* fallthrough */ }
-      }
+          } catch { /* fallthrough */ }
+        }
 
-      // Strategy 4: Try using categoryMask as raw typed array with width/height
-      if (!drawSucceeded) {
-        try {
-          const maskWidth = categoryMask?.width ?? width
-          const maskHeight = categoryMask?.height ?? height
-          const rawData = categoryMask?.data ?? categoryMask
-          if (
-            (rawData instanceof Uint8Array ||
-              rawData instanceof Uint8ClampedArray ||
-              rawData instanceof Float32Array) &&
-            rawData.length >= maskWidth * maskHeight
-          ) {
-            const imgData = maskCtx.createImageData(maskWidth, maskHeight)
-            for (let i = 0; i < maskWidth * maskHeight; i++) {
-              const val = rawData instanceof Float32Array
-                ? Math.round(rawData[i] * 255)
-                : rawData[i]
-              imgData.data[i * 4] = val
-              imgData.data[i * 4 + 1] = val
-              imgData.data[i * 4 + 2] = val
-              imgData.data[i * 4 + 3] = 255
+        // Strategy 2: Use createImageBitmap on categoryMask directly
+        if (!drawSucceeded) {
+          try {
+            const bitmap = await createImageBitmap(categoryMask)
+            maskCtx.drawImage(bitmap, 0, 0, width, height)
+            bitmap.close()
+            drawSucceeded = true
+          } catch { /* fallthrough */ }
+        }
+
+        // Strategy 3: Try MPImage's getImageData() method
+        if (!drawSucceeded) {
+          try {
+            if (typeof categoryMask?.getImageData === 'function') {
+              const imgData = categoryMask.getImageData()
+              maskCtx.putImageData(imgData, 0, 0)
+              drawSucceeded = true
             }
-            maskCtx.putImageData(imgData, 0, 0)
-            drawSucceeded = true
-          }
-        } catch { /* fallthrough */ }
-      }
+          } catch { /* fallthrough */ }
+        }
 
-      if (!drawSucceeded) {
-        console.warn('processMask: Could not extract data from categoryMask — all strategies failed')
+        // Strategy 4: Try using categoryMask as raw typed array with width/height
+        if (!drawSucceeded) {
+          try {
+            const maskWidth = categoryMask?.width ?? width
+            const maskHeight = categoryMask?.height ?? height
+            const rawData = categoryMask?.data ?? categoryMask
+            if (
+              (rawData instanceof Uint8Array ||
+                rawData instanceof Uint8ClampedArray ||
+                rawData instanceof Float32Array) &&
+              rawData.length >= maskWidth * maskHeight
+            ) {
+              const imgData = maskCtx.createImageData(maskWidth, maskHeight)
+              for (let i = 0; i < maskWidth * maskHeight; i++) {
+                const val = rawData instanceof Float32Array
+                  ? Math.round(rawData[i] * 255)
+                  : rawData[i]
+                imgData.data[i * 4] = val
+                imgData.data[i * 4 + 1] = val
+                imgData.data[i * 4 + 2] = val
+                imgData.data[i * 4 + 3] = 255
+              }
+              maskCtx.putImageData(imgData, 0, 0)
+              drawSucceeded = true
+            }
+          } catch { /* fallthrough */ }
+        }
+
+        if (!drawSucceeded) {
+          console.warn('processMaskAsync: Could not extract data from categoryMask — all strategies failed')
+          maskCanvasRef.current = null
+          return null
+        }
+
+        // Read back the mask data to create binary person/background mask
+        const maskData = maskCtx.getImageData(0, 0, width, height)
+        const pixels = maskData.data
+
+        // Detect pixel value range from first 400 pixels (1600 bytes / 4 channels):
+        // selfie_segmenter float16 returns category 0 = background, 1 = person.
+        // When drawn on a 2D canvas, values may appear as:
+        //   - 0/1 in uint8 (float16, needs scaling * 255)
+        //   - 0/255 in uint8 (proper scale)
+        let maxVal = 0
+        for (let i = 0; i < Math.min(pixels.length, 1600); i += 4) {
+          if (pixels[i] > maxVal) maxVal = pixels[i]
+        }
+
+        // If maxVal <= 1, the model returned float16-style 0/1 values — scale by 255
+        const needsScaling = maxVal <= 1
+
+        let personPixelCount = 0
+        for (let i = 0; i < pixels.length; i += 4) {
+          const category = needsScaling ? pixels[i] * 255 : pixels[i]
+          const isPerson = category > 0
+          if (isPerson) personPixelCount++
+          pixels[i] = 255     // R
+          pixels[i + 1] = 255 // G
+          pixels[i + 2] = 255 // B
+          pixels[i + 3] = isPerson ? 255 : 0 // Alpha
+        }
+
+        // If no person pixels found, the mask is invalid
+        if (personPixelCount === 0) {
+          console.warn('processMaskAsync: No person pixels detected in mask — mask is invalid')
+          maskCanvasRef.current = null
+          return null
+        }
+
+        maskCtx.putImageData(maskData, 0, 0)
+        return maskCanvas
+      } catch (err) {
+        console.warn('processMaskAsync: Unexpected error:', err)
         maskCanvasRef.current = null
         return null
       }
-
-      // Read back the mask data to create binary person/background mask
-      const maskData = maskCtx.getImageData(0, 0, width, height)
-      const pixels = maskData.data
-
-      // Detect pixel value range from first 400 pixels (1600 bytes / 4 channels):
-      // selfie_segmenter float16 returns category 0 = background, 1 = person.
-      // When drawn on a 2D canvas, values may appear as:
-      //   - 0/1 in uint8 (float16, needs scaling * 255)
-      //   - 0/255 in uint8 (proper scale)
-      let maxVal = 0
-      for (let i = 0; i < Math.min(pixels.length, 1600); i += 4) {
-        if (pixels[i] > maxVal) maxVal = pixels[i]
-      }
-
-      // If maxVal <= 1, the model returned float16-style 0/1 values — scale by 255
-      const needsScaling = maxVal <= 1
-
-      let personPixelCount = 0
-      for (let i = 0; i < pixels.length; i += 4) {
-        const category = needsScaling ? pixels[i] * 255 : pixels[i]
-        // Person = any non-zero category value after proper scaling
-        // (NOT > 128 — the old threshold that broke float16 masks)
-        const isPerson = category > 0
-        if (isPerson) personPixelCount++
-        pixels[i] = 255     // R
-        pixels[i + 1] = 255 // G
-        pixels[i + 2] = 255 // B
-        pixels[i + 3] = isPerson ? 255 : 0 // Alpha
-      }
-
-      // If no person pixels found, the mask is invalid
-      if (personPixelCount === 0) {
-        console.warn('processMask: No person pixels detected in mask — mask is invalid')
-        maskCanvasRef.current = null
-        return null
-      }
-
-      maskCtx.putImageData(maskData, 0, 0)
-      return maskCanvas
     },
     [ensureOffscreenCanvas]
   )
@@ -470,43 +477,45 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
 
     // Run segmentation
     const now = performance.now()
-    let maskCanvas: HTMLCanvasElement | null = maskCanvasRef.current
-    let maskFailed = false
+    const maskCanvas: HTMLCanvasElement | null = maskCanvasRef.current
 
     if (now - lastSegmentTimeRef.current > 66) {
       try {
         const result = segmenterRef.current.segmentForVideo(video, now)
         lastSegmentTimeRef.current = now
         if (result && result.categoryMask) {
-          maskCanvas = processMask(result.categoryMask, width, height)
-          if (maskCanvas) {
-            // Mask succeeded — reset failure tracking
-            maskFailCountRef.current = 0
-            if (segmentationMaskFailedRef.current) {
-              segmentationMaskFailedRef.current = false
-              setSegmentationMaskFailed(false)
+          // Fire-and-forget async processing — double-buffer pattern:
+          // render loop reads from maskCanvasRef.current while async updates it
+          processMaskAsync(result.categoryMask, width, height).then(mask => {
+            if (mask) {
+              maskCanvasRef.current = mask
+              maskFailCountRef.current = 0
+              if (segmentationMaskFailedRef.current) {
+                segmentationMaskFailedRef.current = false
+                setSegmentationMaskFailed(false)
+              }
+            } else {
+              maskFailCountRef.current++
+              if (maskFailCountRef.current > 10 && !segmentationMaskFailedRef.current) {
+                segmentationMaskFailedRef.current = true
+                setSegmentationMaskFailed(true)
+              }
             }
-          } else {
-            // processMask returned null — mask extraction failed
-            maskFailed = true
-          }
+          }).catch(() => {
+            maskFailCountRef.current++
+            if (maskFailCountRef.current > 10 && !segmentationMaskFailedRef.current) {
+              segmentationMaskFailedRef.current = true
+              setSegmentationMaskFailed(true)
+            }
+          })
         }
       } catch {
-        // Segmentation threw — use last good mask if available
-        maskFailed = true
+        maskFailCountRef.current++
+        if (maskFailCountRef.current > 10 && !segmentationMaskFailedRef.current) {
+          segmentationMaskFailedRef.current = true
+          setSegmentationMaskFailed(true)
+        }
       }
-    }
-
-    // Track consecutive mask failures
-    if (maskFailed) {
-      maskFailCountRef.current++
-      if (maskFailCountRef.current > 5 && !segmentationMaskFailedRef.current) {
-        segmentationMaskFailedRef.current = true
-        setSegmentationMaskFailed(true)
-      }
-      // Invalidate maskCanvasRef since mask is bad — prevents reusing corrupted canvas
-      maskCanvasRef.current = null
-      maskCanvas = null
     }
 
     // Composite
@@ -538,7 +547,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [segmentationReady, drawBackground, drawBgPlusVideo, processMask, ensureOffscreenCanvas])
+  }, [segmentationReady, drawBackground, drawBgPlusVideo, processMaskAsync, ensureOffscreenCanvas])
 
   // ── Start/stop render loop ──
   useEffect(() => {
