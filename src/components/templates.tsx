@@ -770,6 +770,17 @@ export default function TemplatesPage() {
         method: 'POST',
         body: formData,
       })
+
+      // Guard against HTML responses (e.g. redirects, 404 pages)
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        // Server returned non-JSON (likely HTML error page or redirect)
+        if (res.status === 401) {
+          throw new Error('Please sign in to upload files.')
+        }
+        throw new Error(`Server returned ${res.status} — please try again.`)
+      }
+
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Upload failed')
 
