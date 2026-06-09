@@ -1,23 +1,17 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Camera,
   CameraOff,
   Upload,
   X,
   Sparkles,
-  Aperture,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Trash2,
   Timer,
-  TimerReset,
   Maximize2,
   Minimize2,
   ImagePlus,
@@ -46,7 +40,7 @@ interface CapturedPhoto {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Built-in backgrounds — Photo Booth style                           */
+/*  Built-in backgrounds                                               */
 /* ------------------------------------------------------------------ */
 
 const BUILT_IN_BACKGROUNDS: BackgroundOption[] = [
@@ -70,10 +64,11 @@ const BUILT_IN_BACKGROUNDS: BackgroundOption[] = [
 
 const DEFAULT_VIDEO_WIDTH = 1280
 const DEFAULT_VIDEO_HEIGHT = 720
-const COUNTDOWN_SECONDS = 3
 
 /* ------------------------------------------------------------------ */
 /*  Main Component — Photo Booth Kiosk                                 */
+/*  Strategy: VIDEO is always the primary display.                     */
+/*  Canvas overlays ONLY when virtual background is active.            */
 /* ------------------------------------------------------------------ */
 
 export default function LiveDisplay() {
@@ -81,7 +76,6 @@ export default function LiveDisplay() {
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
-  const [videoReady, setVideoReady] = useState(false)
   const [modelLoading, setModelLoading] = useState(false)
   const [segmentationReady, setSegmentationReady] = useState(false)
 
@@ -96,12 +90,16 @@ export default function LiveDisplay() {
   const [countdown, setCountdown] = useState<number | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [mirrorVideo, setMirrorVideo] = useState(true)
-  const [timerMode, setTimerMode] = useState<0 | 3 | 5 | 10>(0) // 0 = instant
+  const [timerMode, setTimerMode] = useState<0 | 3 | 5 | 10>(0)
 
   const allBackgrounds = useMemo(
     () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
     [customBackgrounds]
   )
+
+  // ── Derived: is a virtual background active? ──
+  const currentBg = allBackgrounds.find((b) => b.id === selectedBg)
+  const isVirtualBgActive = currentBg && currentBg.type !== 'none'
 
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -121,12 +119,16 @@ export default function LiveDisplay() {
   })
   const selectedBgRef = useRef<string>(selectedBg)
   const allBackgroundsRef = useRef<BackgroundOption[]>(allBackgrounds)
+  const mirrorVideoRef = useRef<boolean>(mirrorVideo)
+  const isVirtualBgActiveRef = useRef<boolean>(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // ── Keep refs in sync ──
   useEffect(() => { cameraActiveRef.current = cameraActive }, [cameraActive])
   useEffect(() => { selectedBgRef.current = selectedBg }, [selectedBg])
   useEffect(() => { allBackgroundsRef.current = allBackgrounds }, [allBackgrounds])
+  useEffect(() => { mirrorVideoRef.current = mirrorVideo }, [mirrorVideo])
+  useEffect(() => { isVirtualBgActiveRef.current = !!isVirtualBgActive }, [isVirtualBgActive])
 
   // ── Initialize MediaPipe segmentation ──
   useEffect(() => {
@@ -202,7 +204,7 @@ export default function LiveDisplay() {
   // ── Load background image ──
   useEffect(() => {
     const bg = allBackgrounds.find((b) => b.id === selectedBg)
-    if (bg?.type === 'image' || bg?.type === 'custom') {
+    if (bg?.type === 'custom') {
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.src = bg.value
@@ -242,7 +244,7 @@ export default function LiveDisplay() {
         ctx.save()
         ctx.filter = 'blur(16px) brightness(0.7)'
         if (videoRef.current && videoRef.current.readyState >= 2) {
-          if (mirrorVideo) {
+          if (mirrorVideoRef.current) {
             ctx.translate(width, 0)
             ctx.scale(-1, 1)
           }
@@ -266,7 +268,7 @@ export default function LiveDisplay() {
           ctx.fillStyle = '#1c1917'
         }
         ctx.fillRect(0, 0, width, height)
-      } else if ((bg.type === 'image' || bg.type === 'custom') && bgImageRef.current) {
+      } else if (bg.type === 'custom' && bgImageRef.current) {
         const img = bgImageRef.current
         const imgAspect = img.width / img.height
         const canvasAspect = width / height
@@ -288,7 +290,7 @@ export default function LiveDisplay() {
         ctx.fillRect(0, 0, width, height)
       }
     },
-    [mirrorVideo]
+    []
   )
 
   // ── Process segmentation mask ──
@@ -333,9 +335,9 @@ export default function LiveDisplay() {
     [ensureOffscreenCanvas]
   )
 
-  // ── Main render loop ──
+  // ── Main render loop — ONLY runs when virtual BG is active ──
   const renderFrame = useCallback(() => {
-    if (!cameraActiveRef.current) return
+    if (!cameraActiveRef.current || !isVirtualBgActiveRef.current) return
 
     const video = videoRef.current
     const canvas = canvasRef.current
@@ -354,18 +356,19 @@ export default function LiveDisplay() {
 
     const width = canvas.width
     const height = canvas.height
-    const bg = allBackgroundsRef.current.find((b) => b.id === selectedBgRef.current)
-    const hasVirtualBg = bg && bg.type !== 'none'
 
-    // No virtual bg or no segmentation → just draw mirrored video
-    if (!hasVirtualBg || !segmenterRef.current || !segmentationReady) {
+    // If no segmentation available, just draw video on canvas (with background)
+    if (!segmenterRef.current || !segmentationReady) {
       ctx.clearRect(0, 0, width, height)
+      drawBackground(ctx, width, height)
       ctx.save()
-      if (mirrorVideo) {
+      if (mirrorVideoRef.current) {
         ctx.translate(width, 0)
         ctx.scale(-1, 1)
       }
+      ctx.globalAlpha = 0.8
       ctx.drawImage(video, 0, 0, width, height)
+      ctx.globalAlpha = 1
       ctx.restore()
 
       animFrameRef.current = requestAnimationFrame(renderFrame)
@@ -398,7 +401,7 @@ export default function LiveDisplay() {
 
         personCtx.globalCompositeOperation = 'source-in'
         personCtx.save()
-        if (mirrorVideo) {
+        if (mirrorVideoRef.current) {
           personCtx.translate(width, 0)
           personCtx.scale(-1, 1)
         }
@@ -413,7 +416,7 @@ export default function LiveDisplay() {
         ctx.clearRect(0, 0, width, height)
         drawBackground(ctx, width, height)
         ctx.save()
-        if (mirrorVideo) {
+        if (mirrorVideoRef.current) {
           ctx.translate(width, 0)
           ctx.scale(-1, 1)
         }
@@ -424,7 +427,7 @@ export default function LiveDisplay() {
       ctx.clearRect(0, 0, width, height)
       drawBackground(ctx, width, height)
       ctx.save()
-      if (mirrorVideo) {
+      if (mirrorVideoRef.current) {
         ctx.translate(width, 0)
         ctx.scale(-1, 1)
       }
@@ -435,11 +438,21 @@ export default function LiveDisplay() {
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas, mirrorVideo])
+  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas])
 
-  // ── Start/stop render loop ──
+  // ── Start/stop render loop — only when virtual BG is active AND camera is on ──
   useEffect(() => {
-    if (cameraActive && videoReady) {
+    if (cameraActive && isVirtualBgActive) {
+      // Set canvas dimensions when starting
+      if (canvasRef.current && videoRef.current) {
+        const vw = videoRef.current.videoWidth || DEFAULT_VIDEO_WIDTH
+        const vh = videoRef.current.videoHeight || DEFAULT_VIDEO_HEIGHT
+        canvasRef.current.width = vw
+        canvasRef.current.height = vh
+        canvasSizeRef.current = { w: vw, h: vh }
+        maskCanvasRef.current = null
+        personCanvasRef.current = null
+      }
       animFrameRef.current = requestAnimationFrame(renderFrame)
     }
     return () => {
@@ -448,28 +461,11 @@ export default function LiveDisplay() {
         animFrameRef.current = 0
       }
     }
-  }, [cameraActive, videoReady, renderFrame])
-
-  // ── Handle video metadata loaded ──
-  const handleVideoLoaded = useCallback(() => {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (video && canvas) {
-      const vw = video.videoWidth || DEFAULT_VIDEO_WIDTH
-      const vh = video.videoHeight || DEFAULT_VIDEO_HEIGHT
-      canvas.width = vw
-      canvas.height = vh
-      canvasSizeRef.current = { w: vw, h: vh }
-      maskCanvasRef.current = null
-      personCanvasRef.current = null
-      setVideoReady(true)
-    }
-  }, [])
+  }, [cameraActive, isVirtualBgActive, renderFrame])
 
   // ── Start camera ──
   const startCamera = useCallback(async () => {
     setCameraError(null)
-    setVideoReady(false)
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setCameraError('Camera is not supported in this environment.')
@@ -483,45 +479,19 @@ export default function LiveDisplay() {
       })
       streamRef.current = stream
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-
-        if (canvasRef.current) {
-          canvasRef.current.width = DEFAULT_VIDEO_WIDTH
-          canvasRef.current.height = DEFAULT_VIDEO_HEIGHT
-          canvasSizeRef.current = { w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT }
-        }
+      const video = videoRef.current
+      if (video) {
+        video.srcObject = stream
 
         try {
-          await videoRef.current.play()
+          await video.play()
         } catch {
-          if (videoRef.current) {
-            videoRef.current.muted = true
-            await videoRef.current.play()
-          }
+          video.muted = true
+          await video.play()
         }
-
-        setCameraActive(true)
-
-        // Safety: if onLoadedMetadata doesn't fire within 3s, force videoReady
-        setTimeout(() => {
-          setVideoReady((prev) => {
-            if (!prev && videoRef.current && videoRef.current.readyState >= 2) {
-              const vw = videoRef.current.videoWidth || DEFAULT_VIDEO_WIDTH
-              const vh = videoRef.current.videoHeight || DEFAULT_VIDEO_HEIGHT
-              if (canvasRef.current) {
-                canvasRef.current.width = vw
-                canvasRef.current.height = vh
-              }
-              canvasSizeRef.current = { w: vw, h: vh }
-              return true
-            }
-            return prev
-          })
-        }, 3000)
-      } else {
-        setCameraActive(true)
       }
+
+      setCameraActive(true)
     } catch (err) {
       let message = 'An unexpected error occurred while accessing the camera.'
       if (err instanceof DOMException) {
@@ -563,7 +533,8 @@ export default function LiveDisplay() {
     maskCanvasRef.current = null
     personCanvasRef.current = null
     setCameraActive(false)
-    setVideoReady(false)
+    // Reset to no background when camera stops
+    setSelectedBg('none')
   }, [])
 
   // ── Cleanup on unmount ──
@@ -579,35 +550,36 @@ export default function LiveDisplay() {
     }
   }, [])
 
-  // ── Take photo (with optional countdown) ──
+  // ── Take photo ──
   const capturePhoto = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !cameraActive) return
+    const video = videoRef.current
+    if (!video || !cameraActive) return
 
     setCapturing(true)
 
     try {
-      const dataUrl = canvas.toDataURL('image/png')
-      const photo: CapturedPhoto = {
-        id: `photo-${Date.now()}`,
-        dataUrl,
-        timestamp: Date.now(),
-      }
-      setCapturedPhotos((prev) => [photo, ...prev])
-      toast.success('Photo captured!', { duration: 2000 })
-    } catch {
-      // Fallback: capture from video directly
-      try {
+      // If virtual BG is active, capture from canvas
+      if (isVirtualBgActiveRef.current && canvasRef.current) {
+        const dataUrl = canvasRef.current.toDataURL('image/png')
+        const photo: CapturedPhoto = {
+          id: `photo-${Date.now()}`,
+          dataUrl,
+          timestamp: Date.now(),
+        }
+        setCapturedPhotos((prev) => [photo, ...prev])
+        toast.success('Photo captured!', { duration: 2000 })
+      } else {
+        // Capture from video directly
         const tempCanvas = document.createElement('canvas')
-        tempCanvas.width = canvas.width
-        tempCanvas.height = canvas.height
+        tempCanvas.width = video.videoWidth || DEFAULT_VIDEO_WIDTH
+        tempCanvas.height = video.videoHeight || DEFAULT_VIDEO_HEIGHT
         const tempCtx = tempCanvas.getContext('2d')
-        if (tempCtx && videoRef.current) {
+        if (tempCtx) {
           if (mirrorVideo) {
             tempCtx.translate(tempCanvas.width, 0)
             tempCtx.scale(-1, 1)
           }
-          tempCtx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height)
+          tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height)
           const dataUrl = tempCanvas.toDataURL('image/png')
           const photo: CapturedPhoto = {
             id: `photo-${Date.now()}`,
@@ -617,9 +589,9 @@ export default function LiveDisplay() {
           setCapturedPhotos((prev) => [photo, ...prev])
           toast.success('Photo captured!', { duration: 2000 })
         }
-      } catch {
-        toast.error('Failed to capture photo')
       }
+    } catch {
+      toast.error('Failed to capture photo')
     } finally {
       setTimeout(() => setCapturing(false), 400)
     }
@@ -724,10 +696,6 @@ export default function LiveDisplay() {
     setTimerMode(modes[(currentIdx + 1) % modes.length])
   }, [timerMode])
 
-  // ── Derived state ──
-  const currentBg = allBackgrounds.find((b) => b.id === selectedBg)
-  const showCanvas = cameraActive && videoReady
-
   return (
     <div ref={containerRef} className="flex flex-col h-full -m-4 md:-m-6 bg-black">
       {/* ── Main Camera View ── */}
@@ -748,7 +716,7 @@ export default function LiveDisplay() {
             </Button>
           </div>
         ) : !cameraActive ? (
-          /* Camera off — big start button like Life for Cuts */
+          /* Camera off — big start button */
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950">
             <div className="size-32 rounded-full bg-emerald-500/10 flex items-center justify-center mb-6 border-2 border-emerald-500/30">
               <Camera className="size-16 text-emerald-400" />
@@ -768,19 +736,33 @@ export default function LiveDisplay() {
           </div>
         ) : (
           <>
-            {/* Video source — visible as fallback until canvas renders */}
+            {/*
+              ── VIDEO: Always visible as the primary camera feed ──
+              Uses CSS scaleX(-1) for mirror effect.
+              When virtual BG is active, video hides behind canvas.
+            */}
             <video
               ref={videoRef}
-              onLoadedMetadata={handleVideoLoaded}
-              className={`absolute inset-0 w-full h-full object-contain ${showCanvas ? 'invisible' : ''}`}
-              style={{ transform: mirrorVideo ? 'scaleX(-1)' : 'none' }}
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{
+                transform: mirrorVideo ? 'scaleX(-1)' : 'none',
+                zIndex: isVirtualBgActive ? 0 : 1,
+              }}
               playsInline
               muted
             />
-            {/* Canvas output — fills entire area, on top of video */}
+
+            {/*
+              ── CANVAS: Only visible when virtual background is active ──
+              Renders on top of the video with composited output.
+            */}
             <canvas
               ref={canvasRef}
-              className={`absolute inset-0 w-full h-full object-contain ${showCanvas ? '' : 'opacity-0'}`}
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{
+                zIndex: isVirtualBgActive ? 1 : -1,
+                display: isVirtualBgActive ? 'block' : 'none',
+              }}
             />
 
             {/* Countdown overlay */}
@@ -819,7 +801,7 @@ export default function LiveDisplay() {
                     <span className="text-xs font-medium text-white">Loading AI...</span>
                   </div>
                 )}
-                {segmentationReady && currentBg && currentBg.type !== 'none' && (
+                {segmentationReady && isVirtualBgActive && (
                   <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/80 px-3 py-1">
                     <Sparkles className="size-3 text-white" />
                     <span className="text-xs font-medium text-white">AI Background</span>
@@ -874,7 +856,7 @@ export default function LiveDisplay() {
                   )}
                 </Button>
 
-                {/* BIG CAPTURE BUTTON — like Life for Cuts */}
+                {/* BIG CAPTURE BUTTON */}
                 <button
                   onClick={startCapture}
                   disabled={countdown !== null || capturing}
@@ -1034,7 +1016,6 @@ export default function LiveDisplay() {
                         alt={`Photo ${new Date(photo.timestamp).toLocaleTimeString()}`}
                         className="size-24 object-cover"
                       />
-                      {/* Hover actions */}
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                         <button
                           onClick={(e) => { e.stopPropagation(); downloadPhoto(photo) }}
@@ -1066,10 +1047,11 @@ export default function LiveDisplay() {
                     <p className="text-xs text-stone-400">
                       {new Date(selectedPhoto.timestamp).toLocaleString()}
                     </p>
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex gap-2 mt-2">
                       <Button
+                        variant="ghost"
                         size="sm"
-                        className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs"
+                        className="text-white/60 hover:text-white hover:bg-white/10 text-xs h-7 gap-1"
                         onClick={() => downloadPhoto(selectedPhoto)}
                       >
                         <Download className="size-3" />
@@ -1078,7 +1060,7 @@ export default function LiveDisplay() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7 text-xs"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 gap-1"
                         onClick={() => deletePhoto(selectedPhoto.id)}
                       >
                         <Trash2 className="size-3" />
