@@ -310,6 +310,7 @@ function PageContent() {
 
   return (
     <SidebarInset>
+      {currentPage !== 'live-display' && (
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-emerald-100/50 bg-white/80 dark:border-emerald-900/30 dark:bg-gray-950/80 backdrop-blur-md px-4">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
@@ -323,16 +324,19 @@ function PageContent() {
           <UserMenu />
         </div>
       </header>
-      <div className="flex flex-1 flex-col">
-        <div className="flex-1 p-4 md:p-6">
+      )}
+      <div className="flex flex-1 flex-col min-h-0">
+        <div className={`flex-1 min-h-0 ${currentPage === 'live-display' ? 'relative p-0' : 'p-4 md:p-6'}`}>
           <CurrentPageComponent />
         </div>
+        {currentPage !== 'live-display' && (
         <footer className="border-t border-emerald-100/30 dark:border-emerald-900/20 py-4 px-4 md:px-6">
           <p className="text-xs text-muted-foreground text-center">
             <span className="text-emerald-600 dark:text-emerald-400">&copy;</span>{' '}
             {new Date().getFullYear()} UMak CSOA &mdash; Center for Student Organization and Activities. University of Makati.
           </p>
         </footer>
+        )}
       </div>
     </SidebarInset>
   )

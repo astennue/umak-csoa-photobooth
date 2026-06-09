@@ -16,8 +16,11 @@ import {
   Minimize2,
   ImagePlus,
   RotateCcw,
+  ArrowLeft,
+  Radio,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAppStore } from '@/lib/store'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -72,6 +75,8 @@ const DEFAULT_VIDEO_HEIGHT = 720
 /* ------------------------------------------------------------------ */
 
 export default function LiveDisplay() {
+  const { setCurrentPage } = useAppStore()
+
   // ── Camera state ──
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -711,7 +716,7 @@ export default function LiveDisplay() {
   }, [timerMode])
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full -m-4 md:-m-6 bg-black">
+    <div ref={containerRef} className="absolute inset-0 flex flex-col bg-black">
       {/* ── Main Camera View ── */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         {/*
@@ -764,6 +769,23 @@ export default function LiveDisplay() {
         ) : !cameraActive ? (
           /* Camera off — big start button */
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950 z-[2]">
+            {/* Floating header with back button */}
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 bg-gradient-to-b from-black/70 to-transparent z-10">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-white/80 hover:text-white hover:bg-white/20 gap-2"
+                onClick={() => setCurrentPage('dashboard')}
+              >
+                <ArrowLeft className="size-4" />
+                <span className="text-sm">Back</span>
+              </Button>
+              <div className="flex items-center gap-2">
+                <Radio className="size-4 text-emerald-400" />
+                <span className="text-sm font-semibold text-white">Live Display</span>
+              </div>
+              <div className="w-16" /> {/* Spacer for centering */}
+            </div>
             <div className="size-32 rounded-full bg-emerald-500/10 flex items-center justify-center mb-6 border-2 border-emerald-500/30">
               <Camera className="size-16 text-emerald-400" />
             </div>
@@ -806,8 +828,17 @@ export default function LiveDisplay() {
 
             {/* Top bar overlay */}
             <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 z-10 bg-gradient-to-b from-black/50 to-transparent">
-              {/* Live indicator */}
+              {/* Left: Back + Live indicator */}
               <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white/80 hover:text-white hover:bg-white/20 h-9 w-9 rounded-full"
+                  onClick={stopCamera}
+                  title="Back to Dashboard"
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
                 <div className="flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1">
                   <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" />
                   <span className="text-xs font-bold text-white">LIVE</span>
