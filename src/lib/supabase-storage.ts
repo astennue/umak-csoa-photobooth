@@ -1,70 +1,93 @@
 /**
  * Supabase Storage utility for file uploads.
  *
- * Usage:
- * - When NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set,
- *   files are uploaded to Supabase Storage (production).
- * - When they are NOT set, files are saved to the local filesystem
- *   under public/uploads/ (local development).
+ * Credentials are loaded from:
+ * 1. Environment variables (NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+ * 2. Database (SupabaseConfig table with keys "supabase_url" and "service_role_key")
+ *
+ * NO local filesystem fallback — Supabase is required for file storage.
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const STORAGE_BUCKET = 'uploads'
 
+// ── Supabase Client Singleton ──────────────────────────────────────────
+
 let supabaseInstance: SupabaseClient | null = null
+let lastCredsHash: string | null = null
 
-function getSupabaseClient(): SupabaseClient | null {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null
-  if (supabaseInstance) return supabaseInstance
+/**
+ * Get Supabase credentials from env vars or database.
+ */
+async function getSupabaseCredentials(): Promise<{ url: string; key: string } | null> {
+  // 1. Try environment variables first (fastest, no DB query)
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (envUrl && envKey) {
+    return { url: envUrl, key: envKey }
+  }
 
-  supabaseInstance = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  // 2. Try database (SupabaseConfig table)
+  try {
+    const { db } = await import('@/lib/db')
+    const configs = await db.supabaseConfig.findMany()
+    const urlConfig = configs.find(c => c.key === 'supabase_url')
+    const keyConfig = configs.find(c => c.key === 'service_role_key')
+    if (urlConfig?.value && keyConfig?.value) {
+      return { url: urlConfig.value, key: keyConfig.value }
+    }
+  } catch (e) {
+    console.warn('[Supabase Storage] Could not read config from DB:', e)
+  }
+
+  return null
+}
+
+/**
+ * Get or create the Supabase client.
+ * Re-creates the client if credentials have changed.
+ */
+async function getSupabaseClient(): Promise<SupabaseClient | null> {
+  const creds = await getSupabaseCredentials()
+  if (!creds) return null
+
+  // Re-create client if credentials changed (e.g., user updated settings)
+  const credsHash = `${creds.url}:${creds.key.substring(0, 10)}`
+  if (supabaseInstance && lastCredsHash === credsHash) {
+    return supabaseInstance
+  }
+
+  supabaseInstance = createClient(creds.url, creds.key, {
     auth: { persistSession: false },
   })
+  lastCredsHash = credsHash
   return supabaseInstance
 }
 
+// ── Public API ─────────────────────────────────────────────────────────
+
 /**
- * Check if Supabase Storage is configured and available
+ * Synchronous check — only checks env vars (for backwards compat).
+ * Use isSupabaseConfigured() for async check that also checks DB.
  */
 export function isSupabaseStorageAvailable(): boolean {
-  return !!getSupabaseClient()
+  return !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 }
 
 /**
- * Ensure the uploads bucket exists in Supabase Storage
+ * Async check — checks both env vars and database.
  */
-async function ensureBucket(): Promise<boolean> {
-  const client = getSupabaseClient()
-  if (!client) return false
+export async function isSupabaseConfigured(): Promise<boolean> {
+  return !!(await getSupabaseCredentials())
+}
 
-  try {
-    const { data: buckets } = await client.storage.listBuckets()
-    const exists = buckets?.some((b) => b.id === STORAGE_BUCKET)
-
-    if (!exists) {
-      const { error } = await client.storage.createBucket(STORAGE_BUCKET, {
-        public: true,
-        fileSizeLimit: 10 * 1024 * 1024, // 10MB
-        allowedMimeTypes: [
-          'image/png',
-          'image/jpeg',
-          'image/webp',
-          'image/gif',
-        ],
-      })
-      if (error) {
-        console.error('[Supabase Storage] Error creating bucket:', error.message)
-        return false
-      }
-    }
-    return true
-  } catch (err) {
-    console.error('[Supabase Storage] Error ensuring bucket:', err)
-    return false
-  }
+/**
+ * Reset the Supabase client singleton (call after saving new credentials).
+ */
+export function resetSupabaseClient(): void {
+  supabaseInstance = null
+  lastCredsHash = null
 }
 
 export interface UploadResult {
@@ -73,12 +96,13 @@ export interface UploadResult {
 }
 
 /**
- * Upload a file buffer to storage (Supabase or local).
+ * Upload a file buffer to Supabase Storage.
  *
  * @param buffer - File data
- * @param filename - Unique filename (e.g. "template-1234567890-abc123.png")
+ * @param filename - Unique filename
  * @param folder - Sub-folder inside storage (e.g. "templates")
  * @param contentType - MIME type
+ * @throws Error if Supabase is not configured
  */
 export async function uploadFile(
   buffer: Buffer,
@@ -86,92 +110,78 @@ export async function uploadFile(
   folder: string,
   contentType: string
 ): Promise<UploadResult> {
-  // Try Supabase Storage first
-  const client = getSupabaseClient()
-  if (client) {
-    try {
-      await ensureBucket()
+  const client = await getSupabaseClient()
 
-      const storagePath = `${folder}/${filename}`
-      const { error: uploadError } = await client.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, buffer, {
-          contentType,
-          upsert: true,
-        })
-
-      if (uploadError) {
-        console.error('[Supabase Storage] Upload error:', uploadError.message)
-        // Fall through to local storage
-      } else {
-        // Get the public URL
-        const { data: urlData } = client.storage
-          .from(STORAGE_BUCKET)
-          .getPublicUrl(storagePath)
-
-        if (urlData?.publicUrl) {
-          console.log('[Supabase Storage] Upload successful:', storagePath)
-          return {
-            url: urlData.publicUrl,
-            storage: 'supabase',
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[Supabase Storage] Exception:', err)
-      // Fall through to local storage
-    }
+  if (!client) {
+    throw new Error(
+      'Supabase Storage is not configured. Please add your Supabase Service Role Key in Settings > Storage.'
+    )
   }
 
-  // Fallback: Save to local filesystem under public/uploads/
-  const fs = await import('fs/promises')
-  const path = await import('path')
-  const { existsSync } = await import('fs')
+  const storagePath = `${folder}/${filename}`
+  const { error: uploadError } = await client.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType,
+      upsert: true,
+    })
 
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', folder)
-  if (!existsSync(uploadDir)) {
-    await fs.mkdir(uploadDir, { recursive: true })
+  if (uploadError) {
+    throw new Error(`Upload to Supabase failed: ${uploadError.message}`)
   }
 
-  const filePath = path.join(uploadDir, filename)
-  await fs.writeFile(filePath, buffer)
+  const { data: urlData } = client.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(storagePath)
 
+  if (!urlData?.publicUrl) {
+    throw new Error('Failed to get public URL for uploaded file')
+  }
+
+  console.log('[Supabase Storage] Upload successful:', storagePath)
   return {
-    url: `/uploads/${folder}/${filename}`,
-    storage: 'local',
+    url: urlData.publicUrl,
+    storage: 'supabase',
   }
 }
 
 /**
- * Delete a file from storage
+ * Delete a file from Supabase Storage.
  */
 export async function deleteFile(
   folder: string,
-  filename: string,
-  storage: 'supabase' | 'local'
+  filename: string
 ): Promise<boolean> {
-  if (storage === 'supabase') {
-    const client = getSupabaseClient()
-    if (client) {
-      try {
-        const { error } = await client.storage
-          .from(STORAGE_BUCKET)
-          .remove([`${folder}/${filename}`])
-        return !error
-      } catch {
-        return false
-      }
-    }
-  }
+  const client = await getSupabaseClient()
+  if (!client) return false
 
-  // Local: delete file from public/uploads/
   try {
-    const fs = await import('fs/promises')
-    const path = await import('path')
-    const filePath = path.join(process.cwd(), 'public', 'uploads', folder, filename)
-    await fs.unlink(filePath)
-    return true
+    const { error } = await client.storage
+      .from(STORAGE_BUCKET)
+      .remove([`${folder}/${filename}`])
+    return !error
   } catch {
     return false
+  }
+}
+
+/**
+ * Test the Supabase connection by listing buckets.
+ * Returns true if connection works.
+ */
+export async function testConnection(): Promise<{ success: boolean; buckets?: string[]; error?: string }> {
+  const client = await getSupabaseClient()
+  if (!client) {
+    return { success: false, error: 'Supabase credentials not configured' }
+  }
+
+  try {
+    const { data, error } = await client.storage.listBuckets()
+    if (error) {
+      return { success: false, error: error.message }
+    }
+    return { success: true, buckets: data?.map(b => b.id) ?? [] }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
   }
 }

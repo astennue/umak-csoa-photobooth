@@ -36,6 +36,7 @@ import {
   ChevronDown,
   Radio,
   Camera,
+  Settings,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
@@ -64,6 +65,7 @@ import UsersPage from '@/components/users'
 import LoginPage from '@/components/login-page'
 import LiveDisplayPage from '@/components/live-display'
 import VirtualBackgroundPage from '@/components/virtual-background'
+import SupabaseSettings from '@/components/supabase-settings'
 
 type NavItem = { page: Page; label: string; icon: React.ComponentType<{ className?: string }> }
 
@@ -81,6 +83,7 @@ function getNavItems(role?: string): NavItem[] {
     { page: 'devices', label: 'Devices', icon: Monitor, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
     { page: 'audit', label: 'Audit Log', icon: ScrollText, roles: ['SUPER_ADMIN'] },
     { page: 'users', label: 'Users', icon: UserCog, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+    { page: 'settings', label: 'Settings', icon: Settings, roles: ['SUPER_ADMIN'] },
   ]
 
   if (!role) return allItems.filter((item) => item.roles.includes('FACILITATOR')).map(({ roles, ...rest }) => rest)
@@ -304,6 +307,7 @@ function PageContent() {
     devices: DevicesPage,
     audit: AuditLogPage,
     users: UsersPage,
+    settings: SupabaseSettings,
   }
 
   const CurrentPageComponent = pages[currentPage] ?? DashboardPage

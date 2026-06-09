@@ -9,6 +9,8 @@ const env = {
   NEXTAUTH_SECRET: 'umak-csoa-photobooth-secret-key-2024',
   NEXTAUTH_URL: 'http://localhost:3000',
   ENCRYPTION_KEY: 'umak-csoa-encryption-key-32ch',
+  NEXT_PUBLIC_SUPABASE_URL: 'https://ctopipbiminfxcjrkxij.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: '',
   PORT: '3000'
 };
 
