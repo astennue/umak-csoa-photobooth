@@ -454,6 +454,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   }, [cameraActive, isVirtualBgActive, renderFrame])
 
   // ── Start camera ──
+  // Step 1: Acquire stream, set cameraActive=true (mounts the <video>)
   const startCamera = useCallback(async () => {
     setError(null)
 
@@ -473,18 +474,8 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
       })
       streamRef.current = stream
 
-      const video = videoRef.current
-      if (video) {
-        video.srcObject = stream
-
-        try {
-          await video.play()
-        } catch {
-          video.muted = true
-          await video.play()
-        }
-      }
-
+      // Setting cameraActive=true mounts the <video>.
+      // The useEffect below will attach the stream and call play().
       setCameraActive(true)
     } catch (err) {
       let message = 'An unexpected error occurred while accessing the camera.'
@@ -513,6 +504,24 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
   }, [])
 
+  // ── Step 2: When cameraActive becomes true and video mounts, attach stream ──
+  useEffect(() => {
+    if (!cameraActive) return
+
+    const video = videoRef.current
+    const stream = streamRef.current
+    if (!video || !stream) return
+
+    video.srcObject = stream
+    video.play().catch(() => {
+      video.muted = true
+      video.play().catch(() => {
+        setError('Failed to start video playback. Please try again.')
+        setCameraActive(false)
+      })
+    })
+  }, [cameraActive])
+
   // ── Stop camera ──
   const stopCamera = useCallback(() => {
     if (animFrameRef.current) {
@@ -523,9 +532,8 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
+    // Don't access videoRef.current here — the <video> may be unmounted
+    // when cameraActive becomes false. Cleanup useEffect handles it.
     maskCanvasRef.current = null
     personCanvasRef.current = null
     setCameraActive(false)
@@ -538,6 +546,9 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
       cameraActiveRef.current = false
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
       }
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current)
@@ -639,8 +650,35 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
       <CardContent className="p-4 md:p-6 space-y-4">
         {/* ── Camera Preview Area ──────────────────────────────────── */}
         <div className="relative w-full aspect-video bg-stone-800 rounded-lg overflow-hidden border border-stone-700">
+          {/*
+            ── VIDEO: Always mounted so the ref is always available.
+            Hidden with CSS when camera is off.
+          */}
+          <video
+            ref={videoRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{
+              transform: 'scaleX(-1)',
+              zIndex: !cameraActive ? -1 : isVirtualBgActive ? 0 : 1,
+              opacity: cameraActive ? 1 : 0,
+              pointerEvents: cameraActive ? 'auto' : 'none',
+            }}
+            playsInline
+            muted
+          />
+
+          {/* ── CANVAS: Only visible when virtual BG is active ── */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{
+              zIndex: isVirtualBgActive && cameraActive ? 1 : -1,
+              display: isVirtualBgActive && cameraActive ? 'block' : 'none',
+            }}
+          />
+
           {error ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-[2]">
               <div className="size-14 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
                 <CameraOff className="size-7 text-red-400" />
               </div>
@@ -658,7 +696,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
               </Button>
             </div>
           ) : !cameraActive ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-[2]">
               <div className="size-16 rounded-full bg-stone-700/50 flex items-center justify-center mb-4">
                 <Camera className="size-8 text-stone-400" />
               </div>
@@ -667,28 +705,6 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
             </div>
           ) : (
             <>
-              {/* ── VIDEO: Always visible as primary camera feed ── */}
-              <video
-                ref={videoRef}
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{
-                  transform: 'scaleX(-1)',
-                  zIndex: isVirtualBgActive ? 0 : 1,
-                }}
-                playsInline
-                muted
-              />
-
-              {/* ── CANVAS: Only visible when virtual BG is active ── */}
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{
-                  zIndex: isVirtualBgActive ? 1 : -1,
-                  display: isVirtualBgActive ? 'block' : 'none',
-                }}
-              />
-
               {/* Status indicators */}
               <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
                 {modelLoading && (

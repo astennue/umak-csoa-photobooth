@@ -464,6 +464,7 @@ export default function LiveDisplay() {
   }, [cameraActive, isVirtualBgActive, renderFrame])
 
   // ── Start camera ──
+  // Step 1: Acquire the stream and set cameraActive=true (which mounts the <video>)
   const startCamera = useCallback(async () => {
     setCameraError(null)
 
@@ -479,18 +480,8 @@ export default function LiveDisplay() {
       })
       streamRef.current = stream
 
-      const video = videoRef.current
-      if (video) {
-        video.srcObject = stream
-
-        try {
-          await video.play()
-        } catch {
-          video.muted = true
-          await video.play()
-        }
-      }
-
+      // Setting cameraActive=true will mount the <video> element.
+      // The useEffect below will then attach the stream and call play().
       setCameraActive(true)
     } catch (err) {
       let message = 'An unexpected error occurred while accessing the camera.'
@@ -517,6 +508,26 @@ export default function LiveDisplay() {
     }
   }, [])
 
+  // ── Step 2: When cameraActive becomes true and video element mounts, attach stream ──
+  useEffect(() => {
+    if (!cameraActive) return
+
+    const video = videoRef.current
+    const stream = streamRef.current
+    if (!video || !stream) return
+
+    video.srcObject = stream
+    video.play().catch(() => {
+      // Some browsers require muted for autoplay
+      video.muted = true
+      video.play().catch(() => {
+        // If play still fails, show error
+        setCameraError('Failed to start video playback. Please try again.')
+        setCameraActive(false)
+      })
+    })
+  }, [cameraActive])
+
   // ── Stop camera ──
   const stopCamera = useCallback(() => {
     if (animFrameRef.current) {
@@ -527,9 +538,9 @@ export default function LiveDisplay() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
+    // Don't access videoRef.current here — the <video> element will be
+    // unmounted on the next render when cameraActive becomes false.
+    // Just clear the state and the cleanup useEffect will handle the rest.
     maskCanvasRef.current = null
     personCanvasRef.current = null
     setCameraActive(false)
@@ -543,6 +554,9 @@ export default function LiveDisplay() {
       cameraActiveRef.current = false
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
       }
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current)
@@ -700,9 +714,41 @@ export default function LiveDisplay() {
     <div ref={containerRef} className="flex flex-col h-full -m-4 md:-m-6 bg-black">
       {/* ── Main Camera View ── */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/*
+          ── VIDEO: Always mounted in the DOM so the ref is always available.
+          Hidden with CSS when camera is off (opacity-0 + pointer-events-none).
+          Uses CSS scaleX(-1) for mirror effect.
+          When virtual BG is active, video hides behind canvas.
+        */}
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{
+            transform: mirrorVideo ? 'scaleX(-1)' : 'none',
+            zIndex: !cameraActive ? -1 : isVirtualBgActive ? 0 : 1,
+            opacity: cameraActive ? 1 : 0,
+            pointerEvents: cameraActive ? 'auto' : 'none',
+          }}
+          playsInline
+          muted
+        />
+
+        {/*
+          ── CANVAS: Only visible when virtual background is active ──
+          Renders on top of the video with composited output.
+        */}
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{
+            zIndex: isVirtualBgActive && cameraActive ? 1 : -1,
+            display: isVirtualBgActive && cameraActive ? 'block' : 'none',
+          }}
+        />
+
         {cameraError ? (
           /* Camera error state */
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-stone-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-stone-950 z-[2]">
             <div className="size-20 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
               <CameraOff className="size-10 text-red-400" />
             </div>
@@ -717,7 +763,7 @@ export default function LiveDisplay() {
           </div>
         ) : !cameraActive ? (
           /* Camera off — big start button */
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950 z-[2]">
             <div className="size-32 rounded-full bg-emerald-500/10 flex items-center justify-center mb-6 border-2 border-emerald-500/30">
               <Camera className="size-16 text-emerald-400" />
             </div>
@@ -736,35 +782,6 @@ export default function LiveDisplay() {
           </div>
         ) : (
           <>
-            {/*
-              ── VIDEO: Always visible as the primary camera feed ──
-              Uses CSS scaleX(-1) for mirror effect.
-              When virtual BG is active, video hides behind canvas.
-            */}
-            <video
-              ref={videoRef}
-              className="absolute inset-0 w-full h-full object-cover"
-              style={{
-                transform: mirrorVideo ? 'scaleX(-1)' : 'none',
-                zIndex: isVirtualBgActive ? 0 : 1,
-              }}
-              playsInline
-              muted
-            />
-
-            {/*
-              ── CANVAS: Only visible when virtual background is active ──
-              Renders on top of the video with composited output.
-            */}
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full object-cover"
-              style={{
-                zIndex: isVirtualBgActive ? 1 : -1,
-                display: isVirtualBgActive ? 'block' : 'none',
-              }}
-            />
-
             {/* Countdown overlay */}
             <AnimatePresence>
               {countdown !== null && countdown > 0 && (
