@@ -88,6 +88,7 @@ export default function TemplatesPage() {
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+  const isFacilitatorRole = currentRole === 'FACILITATOR'
 
   // State
   const [page, setPage] = useState(1)
@@ -246,7 +247,7 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
           <p className="text-muted-foreground">Design and manage photo templates for your events.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white" disabled={isFacilitatorRole}>
           <Plus className="size-4" />
           Create Template
         </Button>
@@ -360,10 +361,12 @@ export default function TemplatesPage() {
                   <span className="text-xs text-muted-foreground">
                     {format(new Date(template.createdAt), 'MMM d, yyyy')}
                   </span>
-                  <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => openEdit(template)}>
-                    <Pencil className="size-3" />
-                    Edit
-                  </Button>
+                  {!isFacilitatorRole && (
+                    <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => openEdit(template)}>
+                      <Pencil className="size-3" />
+                      Edit
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

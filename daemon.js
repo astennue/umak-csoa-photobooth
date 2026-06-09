@@ -4,8 +4,10 @@ const fs = require('fs');
 
 const env = {
   ...process.env,
-  DATABASE_URL: 'file:/home/z/my-project/db/custom.db',
+  DATABASE_URL: 'postgresql://postgres.ctopipbiminfxcjrkxij:rmJ9mk1ochTDYmNb@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=20',
+  DIRECT_URL: 'postgresql://postgres:rmJ9mk1ochTDYmNb@db.ctopipbiminfxcjrkxij.supabase.co:5432/postgres',
   NEXTAUTH_SECRET: 'umak-csoa-photobooth-secret-key-2024',
+  NEXTAUTH_URL: 'http://localhost:3000',
   ENCRYPTION_KEY: 'umak-csoa-encryption-key-32ch',
   PORT: '3000'
 };

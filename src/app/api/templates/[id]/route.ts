@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
-import { getAuthContext, canAccessOrg } from '@/lib/auth';
+import { getAuthContext, canAccessOrg, isFacilitator } from '@/lib/auth';
 
 export async function GET(
   request: NextRequest,
@@ -51,7 +51,12 @@ export async function PUT(
       return errorResponse('Template not found', 404);
     }
 
-    // RBAC: ORG_ADMIN and FACILITATOR can only edit templates in their org
+    // RBAC: FACILITATOR cannot edit templates
+    if (isFacilitator(ctx)) {
+      return errorResponse('Facilitators cannot edit templates', 403);
+    }
+
+    // RBAC: ORG_ADMIN can only edit templates in their org
     if (!canAccessOrg(ctx, existing.event.organizationId)) {
       return errorResponse('You can only edit templates in your organization', 403);
     }

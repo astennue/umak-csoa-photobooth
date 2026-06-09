@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
       return errorResponse('Unauthorized', 401)
     }
 
-    const { limit, skip } = paginateRequest(request)
+    const { page, limit, skip } = paginateRequest(request)
     const searchParams = getSearchParams(request)
     const search = searchParams.get('search') || ''
 
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return successResponse(usersWithPasswords, 200, { total, limit })
+    return successResponse(usersWithPasswords, 200, { total, page, limit })
   } catch (err: any) {
     return errorResponse(err.message, 500)
   }

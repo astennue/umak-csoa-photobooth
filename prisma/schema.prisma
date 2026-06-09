@@ -1,10 +1,14 @@
+// ── PostgreSQL Schema for Supabase ──────────────────────────────────────
+// Always use PostgreSQL — local dev and production both use Supabase.
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {

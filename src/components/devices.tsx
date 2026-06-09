@@ -111,6 +111,7 @@ export default function DevicesPage() {
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
+  const isFacilitatorRole = currentRole === 'FACILITATOR'
 
   // State
   const [page, setPage] = useState(1)
@@ -235,7 +236,7 @@ export default function DevicesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
           <p className="text-muted-foreground">Monitor and manage photobooth devices.</p>
         </div>
-        <Button onClick={() => setRegisterOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+        <Button onClick={() => setRegisterOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white" disabled={isFacilitatorRole}>
           <Plus className="size-4" />
           Register Device
         </Button>

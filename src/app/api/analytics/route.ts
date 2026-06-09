@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
       totalGallery,
       totalDevices,
       recentSessions,
-    });
+    }, 200);
   } catch (err: any) {
     return errorResponse(err.message, 500);
   }

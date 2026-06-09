@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { getAuthContext, applyEventOrgFilter, canAccessOrg } from '@/lib/auth';
+import { getAuthContext, applyEventOrgFilter, canAccessOrg, isFacilitator } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -44,6 +44,11 @@ export async function POST(request: NextRequest) {
       return errorResponse('Unauthorized', 401);
     }
 
+    // RBAC: FACILITATOR cannot create templates
+    if (isFacilitator(ctx)) {
+      return errorResponse('Facilitators cannot create templates', 403);
+    }
+
     const body = await request.json();
     const { eventId, name, description, frameUrl, overlayUrl, settings, active } = body;
 
@@ -59,7 +64,7 @@ export async function POST(request: NextRequest) {
       return errorResponse('Event not found', 400);
     }
 
-    // RBAC: ORG_ADMIN and FACILITATOR can only create templates for their org's events
+    // RBAC: ORG_ADMIN can only create templates for their org's events
     if (!canAccessOrg(ctx, event.organizationId)) {
       return errorResponse('You can only create templates for events in your organization', 403);
     }

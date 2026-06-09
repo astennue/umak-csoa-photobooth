@@ -10,8 +10,9 @@ export interface ApiResponse {
 }
 
 export function successResponse(data: any, status = 200, extra?: Partial<ApiResponse>): NextResponse {
+  const meta = extra ? { total: extra.total, page: extra.page, limit: extra.limit } : undefined;
   return NextResponse.json(
-    { success: true, data, ...extra },
+    { success: true, data, ...extra, ...(meta ? { meta } : {}) },
     { status }
   );
 }
