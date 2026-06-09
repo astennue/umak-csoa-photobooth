@@ -97,6 +97,8 @@ export default function AuditLogPage() {
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
+  const isSuperAdmin = currentRole === 'SUPER_ADMIN'
+
   // State
   const [page, setPage] = useState(1)
   const [filterOrgId, setFilterOrgId] = useState<string>('all')
@@ -107,7 +109,7 @@ export default function AuditLogPage() {
   const [selectedLog, setSelectedLog] = useState<AuditItem | null>(null)
 
   // Fetch audit logs - scoped to org
-  const { data: auditData, isLoading } = useQuery({
+  const { data: auditData, isLoading, isError, refetch: refetchAudit } = useQuery({
     queryKey: ['audit', page, filterOrgId, filterEventId, filterAction, filterEntityType, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' })
@@ -122,6 +124,7 @@ export default function AuditLogPage() {
       if (!json.success) throw new Error(json.error || 'Failed to fetch audit logs')
       return json
     },
+    retry: 2,
   })
 
   // Fetch organizations for filter - scoped to org
@@ -136,6 +139,7 @@ export default function AuditLogPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   // Fetch events for filter - scoped to org
@@ -150,6 +154,7 @@ export default function AuditLogPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   const orgs: OrgOption[] = orgsData?.data ?? []
@@ -162,9 +167,6 @@ export default function AuditLogPage() {
 
   // Known action types for filter
   const actionTypes = Object.keys(ACTION_CONFIG)
-
-  // Hide org filter for non-SUPER_ADMIN (they can only see their own)
-  const isOrgScoped = currentRole === 'ORG_ADMIN' || currentRole === 'FACILITATOR'
 
   function hasActiveFilters() {
     return filterOrgId !== 'all' || filterEventId !== 'all' || filterAction !== 'all' || filterEntityType !== 'all'
@@ -200,6 +202,21 @@ export default function AuditLogPage() {
     }
   }
 
+  // SUPER_ADMIN only - other roles see restricted message
+  if (!isSuperAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
+          <ScrollText className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-semibold">Access Restricted</h2>
+        <p className="text-muted-foreground text-center max-w-sm">
+          Only Super Administrators have access to the audit log. Contact your system administrator for assistance.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -215,8 +232,8 @@ export default function AuditLogPage() {
           <span className="text-sm font-medium text-muted-foreground">Filters:</span>
         </div>
 
-        {/* Only show org filter for SUPER_ADMIN */}
-        {!isOrgScoped && (
+        {/* Org filter for SUPER_ADMIN (this page is SUPER_ADMIN only anyway) */}
+        {(
           <Select value={filterOrgId} onValueChange={(val) => { setFilterOrgId(val); setPage(1) }}>
             <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="All Orgs" />
@@ -289,6 +306,15 @@ export default function AuditLogPage() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      ) : isError ? (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-destructive">Failed to load audit logs.</p>
+            <Button variant="outline" size="sm" onClick={() => refetchAudit()}>
+              Retry
+            </Button>
           </CardContent>
         </Card>
       ) : logs.length === 0 ? (

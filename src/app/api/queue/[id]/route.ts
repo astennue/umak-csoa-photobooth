@@ -59,7 +59,10 @@ export async function PUT(
 
     const { id } = await params;
 
-    const existing = await db.queueEntry.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
+    const existing = await db.queueEntry.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
     if (!existing) {
       return errorResponse('Queue entry not found', 404);
     }
@@ -70,7 +73,6 @@ export async function PUT(
     }
 
     const body = await request.json();
-
     const { position, status, name, email, phone } = body;
 
     if (status && !VALID_STATUSES.includes(status)) {
@@ -130,7 +132,10 @@ export async function PATCH(
       return errorResponse('Status is required for PATCH', 400);
     }
 
-    const existing = await db.queueEntry.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
+    const existing = await db.queueEntry.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
     if (!existing) {
       return errorResponse('Queue entry not found', 404);
     }

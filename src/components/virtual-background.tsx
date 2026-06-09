@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   Camera,
   CameraOff,
@@ -102,13 +102,20 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const cameraActiveRef = useRef<boolean>(false)
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: DEFAULT_VIDEO_WIDTH, h: DEFAULT_VIDEO_HEIGHT })
 
-  // All backgrounds (built-in + custom)
-  const allBackgrounds = [...BUILT_IN_BACKGROUNDS, ...customBackgrounds]
+  // ── Refs for stable render loop ──
+  const selectedBgRef = useRef<string>(selectedBg)
+  const allBackgroundsRef = useRef<BackgroundOption[]>(allBackgrounds)
 
-  // ── Keep cameraActiveRef in sync ─────────────────────────────────
+  // ── Keep refs in sync ──
   useEffect(() => {
     cameraActiveRef.current = cameraActive
   }, [cameraActive])
+  useEffect(() => {
+    selectedBgRef.current = selectedBg
+  }, [selectedBg])
+  useEffect(() => {
+    allBackgroundsRef.current = allBackgrounds
+  }, [allBackgrounds])
 
   // ── Initialize MediaPipe Tasks Vision (ImageSegmenter) ─────────
   useEffect(() => {
@@ -132,17 +139,32 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
 
         if (cancelled) return
 
-        // Create the image segmenter with selfie segmentation model
-        const segmenter = await ImageSegmenter.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          outputCategoryMask: true,
-          outputConfidenceMasks: false,
-        })
+        let segmenter
+        try {
+          segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          })
+        } catch {
+          // GPU delegate failed, fall back to CPU
+          if (cancelled) return
+          segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              delegate: 'CPU',
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          })
+        }
 
         if (cancelled) {
           segmenter.close()
@@ -195,11 +217,11 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     } else {
       bgImageRef.current = null
     }
-  }, [selectedBg, customBackgrounds])
+  }, [selectedBg, allBackgrounds])
 
   // ── Ensure offscreen canvases exist at the right size ────────────
   const ensureOffscreenCanvas = useCallback(
-    (ref: React.MutableRefObject<HTMLCanvasElement | null>, label: string) => {
+    (ref: React.MutableRefObject<HTMLCanvasElement | null>) => {
       const { w, h } = canvasSizeRef.current
       if (!ref.current || ref.current.width !== w || ref.current.height !== h) {
         const c = document.createElement('canvas')
@@ -212,10 +234,10 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     []
   )
 
-  // ── Draw background on a given context ───────────────────────────
+  // ── Draw background on a given context (uses refs for stable identity) ──
   const drawBackground = useCallback(
     (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-      const bg = allBackgrounds.find((b) => b.id === selectedBg)
+      const bg = allBackgroundsRef.current.find((b) => b.id === selectedBgRef.current)
       if (!bg || bg.type === 'none') {
         // Draw black background
         ctx.fillStyle = '#1c1917'
@@ -275,13 +297,13 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
         ctx.fillRect(0, 0, width, height)
       }
     },
-    [selectedBg, allBackgrounds]
+    []
   )
 
   // ── Process segmentation mask into a proper alpha mask ───────────
   const processMask = useCallback(
     (categoryMask: any, width: number, height: number): HTMLCanvasElement | null => {
-      const maskCanvas = ensureOffscreenCanvas(maskCanvasRef, 'mask')
+      const maskCanvas = ensureOffscreenCanvas(maskCanvasRef)
 
       const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
       if (!maskCtx) return null
@@ -352,7 +374,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
 
     const width = canvas.width
     const height = canvas.height
-    const bg = allBackgrounds.find((b) => b.id === selectedBg)
+    const bg = allBackgroundsRef.current.find((b) => b.id === selectedBgRef.current)
     const hasVirtualBg = bg && bg.type !== 'none'
 
     // ── If no virtual background or no segmentation, just draw mirrored video ──
@@ -388,7 +410,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     // ── Composite using GPU-accelerated canvas operations ────────
     if (maskCanvas) {
       // Use a person canvas to hold the person cutout
-      const personCanvas = ensureOffscreenCanvas(personCanvasRef, 'person')
+      const personCanvas = ensureOffscreenCanvas(personCanvasRef)
       const personCtx = personCanvas.getContext('2d')
       if (personCtx) {
         // Step 1: Draw the alpha mask on the person canvas
@@ -434,7 +456,7 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [selectedBg, segmentationReady, allBackgrounds, drawBackground, processMask, ensureOffscreenCanvas])
+  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas])
 
   // ── Start / stop render loop ─────────────────────────────────────
   useEffect(() => {
@@ -470,6 +492,11 @@ export default function VirtualBackground({ onCapture }: VirtualBackgroundProps)
   const startCamera = useCallback(async () => {
     setError(null)
     setVideoReady(false)
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setError('Camera is not supported in this environment.')
+      return
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({

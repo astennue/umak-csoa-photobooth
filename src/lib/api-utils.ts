@@ -1,20 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export interface ApiResponse {
-  success: boolean;
-  data?: any;
-  error?: string;
+export interface ApiMeta {
   total?: number;
   page?: number;
   limit?: number;
 }
 
-export function successResponse(data: any, status = 200, extra?: Partial<ApiResponse>): NextResponse {
-  const meta = extra ? { total: extra.total, page: extra.page, limit: extra.limit } : undefined;
-  return NextResponse.json(
-    { success: true, data, ...extra, ...(meta ? { meta } : {}) },
-    { status }
-  );
+export interface ApiResponse {
+  success: boolean;
+  data?: any;
+  meta?: ApiMeta;
+  total?: number;
+  page?: number;
+  limit?: number;
+  error?: string;
+}
+
+/**
+ * Success response with proper { data, meta } format.
+ * - For paginated lists, pass extra: { total, page, limit } to get a meta object.
+ * - Top-level total/page/limit are also included for backward compatibility.
+ * - For single items, omit extra (no meta).
+ */
+export function successResponse(data: any, status = 200, extra?: ApiMeta): NextResponse {
+  const response: ApiResponse = {
+    success: true,
+    data,
+  };
+  if (extra && (extra.total !== undefined || extra.page !== undefined || extra.limit !== undefined)) {
+    response.meta = {
+      ...(extra.total !== undefined && { total: extra.total }),
+      ...(extra.page !== undefined && { page: extra.page }),
+      ...(extra.limit !== undefined && { limit: extra.limit }),
+    };
+    // Also include at top level for backward compatibility
+    if (extra.total !== undefined) response.total = extra.total;
+    if (extra.page !== undefined) response.page = extra.page;
+    if (extra.limit !== undefined) response.limit = extra.limit;
+  }
+  return NextResponse.json(response, { status });
 }
 
 export function errorResponse(error: string, status = 400): NextResponse {

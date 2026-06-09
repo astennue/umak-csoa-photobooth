@@ -99,7 +99,7 @@ export default function TemplatesPage() {
   const [form, setForm] = useState<TemplateFormData>(emptyForm)
 
   // Fetch templates - scoped to org
-  const { data: templatesData, isLoading } = useQuery({
+  const { data: templatesData, isLoading, isError, refetch: refetchTemplates } = useQuery({
     queryKey: ['templates', page, filterEventId, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '10' })
@@ -111,6 +111,7 @@ export default function TemplatesPage() {
       if (!json.success) throw new Error(json.error || 'Failed to fetch templates')
       return json
     },
+    retry: 2,
   })
 
   // Fetch events for filters and forms - scoped to org
@@ -125,6 +126,7 @@ export default function TemplatesPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   const events: EventOption[] = eventsData?.data ?? []
@@ -239,6 +241,21 @@ export default function TemplatesPage() {
     }
   }
 
+  // FACILITATOR: show restricted message
+  if (isFacilitatorRole) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
+          <Palette className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-semibold">Access Restricted</h2>
+        <p className="text-muted-foreground text-center max-w-sm">
+          Facilitators do not have access to template management. Contact your organization admin for assistance.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -247,7 +264,7 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
           <p className="text-muted-foreground">Design and manage photo templates for your events.</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white" disabled={isFacilitatorRole}>
+        <Button onClick={() => { setForm(emptyForm); setCreateOpen(true) }} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4" />
           Create Template
         </Button>
@@ -300,6 +317,15 @@ export default function TemplatesPage() {
             </Card>
           ))}
         </div>
+      ) : isError ? (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-destructive">Failed to load templates.</p>
+            <Button variant="outline" size="sm" onClick={() => refetchTemplates()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : templates.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
@@ -361,12 +387,10 @@ export default function TemplatesPage() {
                   <span className="text-xs text-muted-foreground">
                     {format(new Date(template.createdAt), 'MMM d, yyyy')}
                   </span>
-                  {!isFacilitatorRole && (
-                    <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => openEdit(template)}>
-                      <Pencil className="size-3" />
-                      Edit
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => openEdit(template)}>
+                    <Pencil className="size-3" />
+                    Edit
+                  </Button>
                 </div>
               </CardContent>
             </Card>

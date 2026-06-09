@@ -2,17 +2,15 @@ import { NextResponse } from 'next/server'
 import { resetAndSeed } from '@/lib/seed'
 import { db } from '@/lib/db'
 import bcrypt from 'bcryptjs'
-import { getAuthContext } from '@/lib/auth'
+import { getAuthContext, isSuperAdmin } from '@/lib/auth'
+import { successResponse, errorResponse } from '@/lib/api-utils'
 
 export async function POST() {
   try {
     // Protect: Only SUPER_ADMIN can reset the database
     const ctx = await getAuthContext()
-    if (!ctx.userId || ctx.role !== 'SUPER_ADMIN') {
-      return NextResponse.json({
-        success: false,
-        error: { message: 'Unauthorized. Only Super Admins can reset the database.' },
-      }, { status: 403 })
+    if (!ctx.userId || !isSuperAdmin(ctx)) {
+      return errorResponse('Unauthorized. Only Super Admins can reset the database.', 403)
     }
 
     console.log('[Seed API] Resetting database and seeding Super Admin accounts only...')
@@ -25,8 +23,7 @@ export async function POST() {
 
     console.log(`[Seed API] Complete! ${result.users} users, password valid: ${testPassword}`)
 
-    return NextResponse.json({
-      success: true,
+    return successResponse({
       message: 'Database reset. Only 2 Super Admin accounts exist. No organizations, events, or other data.',
       counts: {
         users: result.users,
@@ -46,9 +43,6 @@ export async function POST() {
     })
   } catch (err: any) {
     console.error('[Seed API] Failed:', err)
-    return NextResponse.json({
-      success: false,
-      error: { message: err?.message || String(err) },
-    }, { status: 500 })
+    return errorResponse(err?.message || String(err), 500)
   }
 }

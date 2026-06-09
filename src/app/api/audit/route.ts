@@ -10,6 +10,11 @@ export async function GET(request: NextRequest) {
       return errorResponse('Unauthorized', 401);
     }
 
+    // RBAC: Only SUPER_ADMIN can access audit logs
+    if (!isSuperAdmin(ctx)) {
+      return errorResponse('Only Super Admins can access audit logs', 403);
+    }
+
     const { page, limit, skip } = paginateRequest(request);
     const searchParams = getSearchParams(request);
     const organizationId = searchParams.get('organizationId') || '';
@@ -19,13 +24,7 @@ export async function GET(request: NextRequest) {
 
     const where: any = {};
 
-    // RBAC: ORG_ADMIN and FACILITATOR can only see audit logs for their own org
-    if (!isSuperAdmin(ctx) && ctx.organizationId) {
-      where.organizationId = ctx.organizationId;
-    } else if (organizationId) {
-      where.organizationId = organizationId;
-    }
-
+    if (organizationId) where.organizationId = organizationId;
     if (eventId) where.eventId = eventId;
     if (action) where.action = action;
     if (entityType) where.entityType = entityType;

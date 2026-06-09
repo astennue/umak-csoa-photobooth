@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
-import { getAuthContext, canAccessOrg } from '@/lib/auth';
+import { getAuthContext, canAccessOrg, isSuperAdmin } from '@/lib/auth';
 
 const VALID_STATUSES = ['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
 const STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -58,7 +58,6 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { ...updateData } = body;
 
     const existing = await db.event.findUnique({ where: { id } });
     if (!existing) {
@@ -70,7 +69,12 @@ export async function PUT(
       return errorResponse('You can only edit events in your organization', 403);
     }
 
-    const { name, description, location, startDate, endDate, status, maxSessions } = updateData;
+    const { name, description, location, startDate, endDate, status, maxSessions, organizationId } = body;
+
+    // Only SUPER_ADMIN can change the organization of an event
+    if (organizationId && organizationId !== existing.organizationId && !isSuperAdmin(ctx)) {
+      return errorResponse('Only Super Admins can move events between organizations', 403);
+    }
 
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       return errorResponse('Name must be a non-empty string', 400);
@@ -92,11 +96,41 @@ export async function PUT(
         ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
         ...(status && { status }),
         ...(maxSessions !== undefined && { maxSessions }),
+        ...(isSuperAdmin(ctx) && organizationId !== undefined && { organizationId }),
       },
       include: { organization: { select: { id: true, name: true } } },
     });
 
     return successResponse(event);
+  } catch (err: any) {
+    return errorResponse(err.message, 500);
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    const { id } = await params;
+
+    const existing = await db.event.findUnique({ where: { id } });
+    if (!existing) {
+      return errorResponse('Event not found', 404);
+    }
+
+    // RBAC: Only SUPER_ADMIN can delete events (cascade deletes sessions, queue, etc.)
+    if (!isSuperAdmin(ctx)) {
+      return errorResponse('Only Super Admins can delete events', 403);
+    }
+
+    await db.event.delete({ where: { id } });
+    return successResponse({ deleted: true });
   } catch (err: any) {
     return errorResponse(err.message, 500);
   }

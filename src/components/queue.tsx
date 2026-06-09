@@ -305,9 +305,10 @@ export default function QueuePage() {
   if (currentOrgId) queryParams.set('userOrgId', currentOrgId)
 
   // Fetch queue entries
-  const { data: queueData, isLoading: queueLoading } = useQuery<PaginatedResponse>({
+  const { data: queueData, isLoading: queueLoading, isError: queueError, refetch: refetchQueue } = useQuery<PaginatedResponse>({
     queryKey: ['queue', activeEventId, currentRole, currentOrgId],
     queryFn: () => fetch(`/api/queue?${queryParams.toString()}`).then(r => r.json()),
+    retry: 2,
   })
 
   // Fetch events for dropdowns - scoped to org
@@ -318,6 +319,7 @@ export default function QueuePage() {
   const { data: eventsData } = useQuery<{ success: boolean; data: EventOption[] }>({
     queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: () => fetch(`/api/events?${eventsParams.toString()}`).then(r => r.json()),
+    retry: 2,
   })
 
   const events = eventsData?.data || []
@@ -492,6 +494,13 @@ export default function QueuePage() {
                         <Skeleton key={i} className="h-28 w-full rounded-lg" />
                       ))}
                     </div>
+                  ) : queueError ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                      <p className="text-sm text-destructive">Failed to load queue.</p>
+                      <Button variant="outline" size="sm" onClick={() => refetchQueue()}>
+                        Retry
+                      </Button>
+                    </div>
                   ) : colEntries.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8">
                       <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-2">
@@ -537,6 +546,13 @@ export default function QueuePage() {
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
+              </div>
+            ) : queueError ? (
+              <div className="p-6 flex flex-col items-center gap-3">
+                <p className="text-sm text-destructive">Failed to load queue entries.</p>
+                <Button variant="outline" size="sm" onClick={() => refetchQueue()}>
+                  Retry
+                </Button>
               </div>
             ) : entries.length === 0 ? (
               <div className="p-6 text-center text-muted-foreground">

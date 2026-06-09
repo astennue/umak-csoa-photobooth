@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { getAuthContext, isSuperAdmin } from '@/lib/auth';
+import { getAuthContext, isSuperAdmin, getOrgScope } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,8 +24,9 @@ export async function GET(request: NextRequest) {
     }
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see their own organization
-    if (!isSuperAdmin(ctx) && ctx.organizationId) {
-      where.id = ctx.organizationId;
+    const orgScope = getOrgScope(ctx);
+    if (orgScope) {
+      where.id = orgScope;
     }
 
     const [items, total] = await Promise.all([
@@ -52,13 +53,13 @@ export async function POST(request: NextRequest) {
       return errorResponse('Unauthorized', 401);
     }
 
-    const body = await request.json();
-    const { name, description, logoUrl, email, phone, active } = body;
-
     // RBAC: Only SUPER_ADMIN can create organizations
     if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can create organizations', 403);
     }
+
+    const body = await request.json();
+    const { name, description, logoUrl, email, phone, active } = body;
 
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return errorResponse('Name is required and must be a non-empty string', 400);

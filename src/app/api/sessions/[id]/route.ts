@@ -57,7 +57,10 @@ export async function PUT(
 
     const { id } = await params;
 
-    const existing = await db.session.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
+    const existing = await db.session.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
     if (!existing) {
       return errorResponse('Session not found', 404);
     }
@@ -68,7 +71,6 @@ export async function PUT(
     }
 
     const body = await request.json();
-
     const { guestName, guestEmail, guestPhone, status, notes } = body;
 
     if (guestName !== undefined && (typeof guestName !== 'string' || guestName.trim() === '')) {
@@ -125,7 +127,10 @@ export async function PATCH(
       return errorResponse('Status is required for PATCH', 400);
     }
 
-    const existing = await db.session.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
+    const existing = await db.session.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
     if (!existing) {
       return errorResponse('Session not found', 404);
     }

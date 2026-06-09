@@ -44,16 +44,19 @@ export async function PUT(
       return errorResponse('Unauthorized', 401);
     }
 
-    const { id } = await params;
-
-    const existing = await db.template.findUnique({ where: { id }, include: { event: { select: { organizationId: true } } } });
-    if (!existing) {
-      return errorResponse('Template not found', 404);
-    }
-
     // RBAC: FACILITATOR cannot edit templates
     if (isFacilitator(ctx)) {
       return errorResponse('Facilitators cannot edit templates', 403);
+    }
+
+    const { id } = await params;
+
+    const existing = await db.template.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
+    if (!existing) {
+      return errorResponse('Template not found', 404);
     }
 
     // RBAC: ORG_ADMIN can only edit templates in their org
@@ -62,7 +65,6 @@ export async function PUT(
     }
 
     const body = await request.json();
-
     const { name, description, frameUrl, overlayUrl, settings, active } = body;
 
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
@@ -83,6 +85,43 @@ export async function PUT(
     });
 
     return successResponse(template);
+  } catch (err: any) {
+    return errorResponse(err.message, 500);
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await getAuthContext();
+    if (!ctx.userId) {
+      return errorResponse('Unauthorized', 401);
+    }
+
+    // RBAC: FACILITATOR cannot delete templates
+    if (isFacilitator(ctx)) {
+      return errorResponse('Facilitators cannot delete templates', 403);
+    }
+
+    const { id } = await params;
+
+    const existing = await db.template.findUnique({
+      where: { id },
+      include: { event: { select: { organizationId: true } } },
+    });
+    if (!existing) {
+      return errorResponse('Template not found', 404);
+    }
+
+    // RBAC: ORG_ADMIN can only delete templates in their org
+    if (!canAccessOrg(ctx, existing.event.organizationId)) {
+      return errorResponse('You can only delete templates in your organization', 403);
+    }
+
+    await db.template.delete({ where: { id } });
+    return successResponse({ deleted: true });
   } catch (err: any) {
     return errorResponse(err.message, 500);
   }

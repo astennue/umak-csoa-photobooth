@@ -2,23 +2,25 @@ import { db } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-utils'
 import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { getAuthContext, canAccessOrg } from '@/lib/auth'
+import { getAuthContext, canAccessOrg, isSuperAdmin, isOrgAdmin, isFacilitator } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/crypto'
 
-// Helper to determine if a user can see the password of another user
-function canSeePassword(ctx: { role: string | null; userId: string | null; organizationId: string | null }, targetUser: { id: string; role: string; organizationId: string | null }): boolean {
+/**
+ * Determine if the requesting user can see the target user's plain password.
+ * - SUPER_ADMIN: sees ALL passwords
+ * - ORG_ADMIN: sees own password + FACILITATOR passwords in their org only
+ * - FACILITATOR: sees NO passwords
+ */
+function canSeePassword(
+  ctx: { role: string | null; userId: string | null; organizationId: string | null },
+  target: { id: string; role: string; organizationId: string | null }
+): boolean {
   if (!ctx.role || !ctx.userId) return false
-  // SUPER_ADMIN can see ALL passwords
   if (ctx.role === 'SUPER_ADMIN') return true
-  // ORG_ADMIN can see own password + FACILITATOR passwords in their org
-  // CANNOT see SUPER_ADMIN passwords or other ORG_ADMIN passwords
   if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
-    // Own password
-    if (targetUser.id === ctx.userId) return true
-    // FACILITATOR passwords in same org only
-    return targetUser.organizationId === ctx.organizationId && targetUser.role === 'FACILITATOR'
+    if (target.id === ctx.userId) return true
+    return target.organizationId === ctx.organizationId && target.role === 'FACILITATOR'
   }
-  // FACILITATOR cannot see any passwords
   return false
 }
 
@@ -56,6 +58,7 @@ export async function GET(
     }
 
     // RBAC: ORG_ADMIN and FACILITATOR can only view users in their own org
+    // SUPER_ADMIN can view any user
     if (!canAccessOrg(ctx, user.organizationId)) {
       return errorResponse('You can only view users in your organization', 403)
     }
@@ -82,6 +85,11 @@ export async function PUT(
       return errorResponse('Unauthorized', 401)
     }
 
+    // RBAC: FACILITATOR cannot edit any accounts
+    if (isFacilitator(ctx)) {
+      return errorResponse('Facilitators cannot edit user accounts', 403)
+    }
+
     const { id } = await params
     const body = await request.json()
     const { name, email, role, organizationId, active, password } = body
@@ -92,27 +100,31 @@ export async function PUT(
     }
 
     // RBAC: ORG_ADMIN can only edit FACILITATOR accounts in their own org
-    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+    if (isOrgAdmin(ctx) && ctx.organizationId) {
       if (existing.role !== 'FACILITATOR') {
         return errorResponse('You can only edit Facilitator accounts', 403)
       }
       if (existing.organizationId !== ctx.organizationId) {
         return errorResponse('You can only edit users in your organization', 403)
       }
-      // Cannot change role away from FACILITATOR
+      // ORG_ADMIN cannot change role away from FACILITATOR
       if (role && role !== 'FACILITATOR') {
         return errorResponse('You can only assign Facilitator role', 403)
       }
-    }
-
-    // RBAC: FACILITATOR cannot edit any accounts
-    if (ctx.role === 'FACILITATOR') {
-      return errorResponse('Facilitators cannot edit user accounts', 403)
+      // ORG_ADMIN cannot change org assignment
+      if (organizationId && organizationId !== ctx.organizationId) {
+        return errorResponse('You cannot move users to a different organization', 403)
+      }
     }
 
     // SUPER_ADMIN changing role to ORG_ADMIN must specify organization
-    if (ctx.role === 'SUPER_ADMIN' && role === 'ORG_ADMIN' && !organizationId) {
+    if (isSuperAdmin(ctx) && role === 'ORG_ADMIN' && !organizationId && !existing.organizationId) {
       return errorResponse('Organization is required for Org Admin role')
+    }
+
+    // SUPER_ADMIN changing role to FACILITATOR must specify organization
+    if (isSuperAdmin(ctx) && role === 'FACILITATOR' && !organizationId && !existing.organizationId) {
+      return errorResponse('Organization is required for Facilitator role')
     }
 
     // Check email uniqueness if email is being changed
@@ -129,7 +141,7 @@ export async function PUT(
     if (role !== undefined) data.role = role
     if (organizationId !== undefined) {
       // ORG_ADMIN must keep users in their own org
-      if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+      if (isOrgAdmin(ctx) && ctx.organizationId) {
         data.organizationId = ctx.organizationId
       } else {
         data.organizationId = organizationId || null
@@ -172,20 +184,20 @@ export async function DELETE(
       return errorResponse('Unauthorized', 401)
     }
 
-    const { id } = await params
-
-    // FACILITATOR cannot delete users
-    if (ctx.role === 'FACILITATOR') {
+    // RBAC: FACILITATOR cannot delete users
+    if (isFacilitator(ctx)) {
       return errorResponse('Facilitators cannot delete user accounts', 403)
     }
+
+    const { id } = await params
 
     const existing = await db.user.findUnique({ where: { id } })
     if (!existing) {
       return errorResponse('User not found', 404)
     }
 
-    // ORG_ADMIN can only delete FACILITATOR accounts in their own org
-    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+    // RBAC: ORG_ADMIN can only delete FACILITATOR accounts in their own org
+    if (isOrgAdmin(ctx) && ctx.organizationId) {
       if (existing.role !== 'FACILITATOR') {
         return errorResponse('You can only delete Facilitator accounts', 403)
       }

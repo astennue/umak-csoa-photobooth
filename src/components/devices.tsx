@@ -129,7 +129,7 @@ export default function DevicesPage() {
   const [formFirmware, setFormFirmware] = useState('')
 
   // Fetch devices - scoped to org
-  const { data: devicesData, isLoading } = useQuery({
+  const { data: devicesData, isLoading, isError, refetch: refetchDevices } = useQuery({
     queryKey: ['devices', page, filterEventId, filterStatus, filterType, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '10' })
@@ -143,6 +143,7 @@ export default function DevicesPage() {
       if (!json.success) throw new Error(json.error || 'Failed to fetch devices')
       return json
     },
+    retry: 2,
   })
 
   // Fetch events - scoped to org
@@ -157,6 +158,7 @@ export default function DevicesPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   const events: EventOption[] = eventsData?.data ?? []
@@ -228,6 +230,21 @@ export default function DevicesPage() {
     setPage(1)
   }
 
+  // FACILITATOR: show restricted message
+  if (isFacilitatorRole) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
+          <Monitor className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-semibold">Access Restricted</h2>
+        <p className="text-muted-foreground text-center max-w-sm">
+          Facilitators do not have access to device management. Contact your organization admin for assistance.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -236,7 +253,7 @@ export default function DevicesPage() {
           <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
           <p className="text-muted-foreground">Monitor and manage photobooth devices.</p>
         </div>
-        <Button onClick={() => setRegisterOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white" disabled={isFacilitatorRole}>
+        <Button onClick={() => setRegisterOpen(true)} className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
           <Plus className="size-4" />
           Register Device
         </Button>
@@ -306,6 +323,15 @@ export default function DevicesPage() {
             </Card>
           ))}
         </div>
+      ) : isError ? (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-destructive">Failed to load devices.</p>
+            <Button variant="outline" size="sm" onClick={() => refetchDevices()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : devices.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">

@@ -178,9 +178,10 @@ export default function SessionsPage() {
   if (currentOrgId) queryParams.set('userOrgId', currentOrgId)
 
   // Fetch sessions
-  const { data: sessionsData, isLoading: sessionsLoading } = useQuery<PaginatedResponse>({
+  const { data: sessionsData, isLoading: sessionsLoading, isError: sessionsError, refetch: refetchSessions } = useQuery<PaginatedResponse>({
     queryKey: ['sessions', page, activeEventId, statusFilter, currentRole, currentOrgId],
     queryFn: () => fetch(`/api/sessions?${queryParams.toString()}`).then(r => r.json()),
+    retry: 2,
   })
 
   // Fetch events for dropdowns - scoped to org
@@ -191,6 +192,7 @@ export default function SessionsPage() {
   const { data: eventsData } = useQuery<{ success: boolean; data: EventOption[] }>({
     queryKey: ['events-list', currentRole, currentOrgId],
     queryFn: () => fetch(`/api/events?${eventsParams.toString()}`).then(r => r.json()),
+    retry: 2,
   })
 
   const events = eventsData?.data || []
@@ -394,6 +396,13 @@ export default function SessionsPage() {
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
+            </div>
+          ) : sessionsError ? (
+            <div className="p-6 flex flex-col items-center gap-3">
+              <p className="text-sm text-destructive">Failed to load sessions.</p>
+              <Button variant="outline" size="sm" onClick={() => refetchSessions()}>
+                Retry
+              </Button>
             </div>
           ) : sessions.length === 0 ? (
             <div className="p-6 text-center">

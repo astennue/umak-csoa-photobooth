@@ -95,7 +95,7 @@ export default function GalleryPage() {
   const [formIsFavorite, setFormIsFavorite] = useState(false)
 
   // Fetch gallery
-  const { data: galleryData, isLoading } = useQuery({
+  const { data: galleryData, isLoading, isError, refetch: refetchGallery } = useQuery({
     queryKey: ['gallery', page, eventId, sessionId, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: '20' })
@@ -108,6 +108,7 @@ export default function GalleryPage() {
       if (!json.success) throw new Error(json.error || 'Failed to fetch gallery')
       return json
     },
+    retry: 2,
   })
 
   // Fetch events for filters - scoped to org
@@ -122,6 +123,7 @@ export default function GalleryPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   // Fetch sessions for filters (filtered by event)
@@ -137,6 +139,7 @@ export default function GalleryPage() {
       if (!json.success) throw new Error(json.error)
       return json
     },
+    retry: 2,
   })
 
   // Fetch sessions for form (filtered by selected form event)
@@ -153,6 +156,7 @@ export default function GalleryPage() {
       return json
     },
     enabled: !!formEventId,
+    retry: 2,
   })
 
   const events: EventOption[] = eventsData?.data ?? []
@@ -314,6 +318,15 @@ export default function GalleryPage() {
             </Card>
           ))}
         </div>
+      ) : isError ? (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-destructive">Failed to load gallery.</p>
+            <Button variant="outline" size="sm" onClick={() => refetchGallery()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : photos.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">

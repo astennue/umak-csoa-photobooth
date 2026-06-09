@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { getAuthContext, applyOrgFilter } from '@/lib/auth';
+import { getAuthContext, getOrgScope, isFacilitator } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || '';
 
     const where: any = {};
-    if (organizationId) where.organizationId = organizationId;
     if (status) where.status = status;
     if (search) {
       where.OR = [
@@ -27,8 +26,14 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // Apply RBAC: ORG_ADMIN and FACILITATOR can only see their own org's events
-    applyOrgFilter(where, ctx.role || '', ctx.organizationId || '');
+    // RBAC: ORG_ADMIN and FACILITATOR can only see their own org's events
+    const orgScope = getOrgScope(ctx);
+    if (orgScope) {
+      where.organizationId = orgScope;
+    } else if (organizationId) {
+      // SUPER_ADMIN can filter by any org
+      where.organizationId = organizationId;
+    }
 
     const [items, total] = await Promise.all([
       db.event.findMany({
@@ -66,8 +71,10 @@ export async function POST(request: NextRequest) {
 
     // Determine the effective organizationId
     let effectiveOrgId = organizationId;
+
     // RBAC: ORG_ADMIN and FACILITATOR can only create events for their own org
-    if (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR') {
+    // FACILITATOR auto-assigns their orgId
+    if (isFacilitator(ctx) || ctx.role === 'ORG_ADMIN') {
       if (!ctx.organizationId) {
         return errorResponse('You are not assigned to an organization', 403);
       }

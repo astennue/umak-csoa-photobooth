@@ -185,7 +185,7 @@ export default function UsersPage() {
   const [showEditPassword, setShowEditPassword] = useState(false)
 
   // Fetch users - scoped to org
-  const { data: usersData, isLoading } = useQuery<UsersResponse>({
+  const { data: usersData, isLoading, isError, refetch: refetchUsers } = useQuery<UsersResponse>({
     queryKey: ['users', currentRole, currentOrgId],
     queryFn: () => {
       const params = new URLSearchParams()
@@ -193,6 +193,7 @@ export default function UsersPage() {
       if (currentOrgId) params.set('userOrgId', currentOrgId)
       return fetch(`/api/users?${params.toString()}`).then((r) => r.json())
     },
+    retry: 2,
   })
 
   // Fetch organizations for dropdown - scoped to org
@@ -204,6 +205,7 @@ export default function UsersPage() {
       if (currentOrgId) params.set('userOrgId', currentOrgId)
       return fetch(`/api/organizations?${params.toString()}`).then((r) => r.json())
     },
+    retry: 2,
   })
 
   const orgs = orgsData?.data ?? []
@@ -429,6 +431,13 @@ export default function UsersPage() {
         <CardContent>
           {isLoading ? (
             <TableSkeleton />
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center py-8 gap-3">
+              <p className="text-sm text-destructive">Failed to load users.</p>
+              <Button variant="outline" size="sm" onClick={() => refetchUsers()}>
+                Retry
+              </Button>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <Table>

@@ -101,6 +101,7 @@ export default function OrganizationsPage() {
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
   const currentOrgName = (session?.user as any)?.organizationName as string | undefined
 
+  const isFacilitator = currentRole === 'FACILITATOR'
   const isOrgScoped = currentRole === 'ORG_ADMIN' || currentRole === 'FACILITATOR'
   const canManageOrgs = currentRole === 'SUPER_ADMIN'
 
@@ -120,7 +121,7 @@ export default function OrganizationsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   // Query - scoped to org for ORG_ADMIN/FACILITATOR
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['organizations', page, limit, debouncedSearch, currentRole, currentOrgId],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) })
@@ -131,6 +132,7 @@ export default function OrganizationsPage() {
       if (!res.ok) throw new Error('Failed to fetch organizations')
       return res.json()
     },
+    retry: 2,
   })
 
   // Mutations
@@ -260,7 +262,22 @@ export default function OrganizationsPage() {
   const totalPages = data ? Math.ceil(data.total / limit) : 0
   const organizations = data?.data ?? []
 
-  // For ORG_ADMIN/FACILITATOR: show a detail view of their own org
+  // FACILITATOR: show restricted message
+  if (isFacilitator) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
+          <Shield className="size-8 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-semibold">Access Restricted</h2>
+        <p className="text-muted-foreground text-center max-w-sm">
+          Facilitators do not have access to organization management. Contact your organization admin for assistance.
+        </p>
+      </div>
+    )
+  }
+
+  // For ORG_ADMIN: show a detail view of their own org
   if (isOrgScoped && organizations.length === 1) {
     const org = organizations[0]
     return (
@@ -371,6 +388,17 @@ export default function OrganizationsPage() {
                   {canManageOrgs && <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>}
                 </TableRow>
               ))
+            ) : isError ? (
+              <TableRow>
+                <TableCell colSpan={canManageOrgs ? 6 : 5} className="h-24 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <p className="text-sm text-destructive">Failed to load organizations.</p>
+                    <Button variant="outline" size="sm" onClick={() => refetch()}>
+                      Retry
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : organizations.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManageOrgs ? 6 : 5} className="h-24 text-center">

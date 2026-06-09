@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -30,6 +31,7 @@ import {
   ImageIcon,
   Monitor,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -390,21 +392,145 @@ function RecentSessionsTable({ sessions }: RecentSessionsTableProps) {
   )
 }
 
+// ─── Error Card ──────────────────────────────────────────────────────────────
+
+function ErrorCard({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Card className="border-destructive/50">
+      <CardContent className="p-6 flex flex-col items-center gap-3">
+        <p className="text-sm text-destructive">Failed to load analytics data.</p>
+        <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+          <RefreshCw className="size-3.5" />
+          Retry
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Main Dashboard Page ─────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const { setCurrentPage } = useAppStore()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
-  const currentOrgId = (session?.user as any)?.organizationId as string | undefined
 
   // Analytics API uses server-side getAuthContext() for auth scoping
-  const { data, isLoading, isError } = useQuery<AnalyticsResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<AnalyticsResponse>({
     queryKey: ['analytics'],
     queryFn: () => fetch('/api/analytics').then((r) => r.json()),
+    retry: 2,
   })
 
   const analytics = data?.data
+
+  // Determine which stats to show based on role
+  const isSuperAdmin = currentRole === 'SUPER_ADMIN'
+  const isOrgAdmin = currentRole === 'ORG_ADMIN'
+  const isFacilitator = currentRole === 'FACILITATOR'
+  const showOrgs = isSuperAdmin
+
+  // Build primary stats based on role
+  const primaryStats = []
+  if (showOrgs) {
+    primaryStats.push({
+      title: 'Organizations',
+      value: analytics?.totalOrganizations ?? 0,
+      description: 'Total registered organizations',
+      icon: Building2,
+      gradient: 'from-violet-500 to-purple-700',
+    })
+  }
+  primaryStats.push({
+    title: 'Active Events',
+    value: analytics?.activeEvents ?? 0,
+    description: 'Events currently running',
+    icon: Calendar,
+    gradient: 'from-emerald-500 to-emerald-700',
+  })
+  primaryStats.push({
+    title: 'Completed Sessions',
+    value: analytics?.completedSessions ?? 0,
+    description: 'Sessions finished successfully',
+    icon: CheckCircle,
+    gradient: 'from-teal-500 to-cyan-700',
+  })
+  primaryStats.push({
+    title: 'Queue Waiting',
+    value: analytics?.waitingInQueue ?? 0,
+    description: 'Guests currently in queue',
+    icon: Clock,
+    gradient: 'from-amber-500 to-amber-700',
+  })
+
+  // Build secondary stats based on role
+  const secondaryStats = []
+  secondaryStats.push({
+    title: 'Total Events',
+    value: analytics?.totalEvents ?? 0,
+    icon: Calendar,
+    borderColor: 'border-l-violet-500',
+    iconBg: 'bg-violet-100 dark:bg-violet-900/30',
+    iconColor: 'text-violet-600 dark:text-violet-400',
+  })
+  secondaryStats.push({
+    title: 'Total Sessions',
+    value: analytics?.totalSessions ?? 0,
+    icon: Users,
+    borderColor: 'border-l-emerald-500',
+    iconBg: 'bg-emerald-100 dark:bg-emerald-900/30',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  })
+  if (!isFacilitator) {
+    secondaryStats.push({
+      title: 'Gallery Photos',
+      value: analytics?.totalGallery ?? 0,
+      icon: ImageIcon,
+      borderColor: 'border-l-teal-500',
+      iconBg: 'bg-teal-100 dark:bg-teal-900/30',
+      iconColor: 'text-teal-600 dark:text-teal-400',
+    })
+    secondaryStats.push({
+      title: 'Total Devices',
+      value: analytics?.totalDevices ?? 0,
+      icon: Monitor,
+      borderColor: 'border-l-amber-500',
+      iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+      iconColor: 'text-amber-600 dark:text-amber-400',
+    })
+  }
+
+  // Quick actions based on role
+  const quickActions = []
+  quickActions.push({
+    label: 'Manage Events',
+    desc: 'View and manage all events',
+    icon: Calendar,
+    page: 'events' as const,
+    borderClass: 'border-l-emerald-500',
+    hoverClass: 'hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20',
+    gradientClass: 'from-emerald-400 to-emerald-600',
+  })
+  quickActions.push({
+    label: 'View Sessions',
+    desc: 'Browse all photobooth sessions',
+    icon: Camera,
+    page: 'sessions' as const,
+    borderClass: 'border-l-sky-500',
+    hoverClass: 'hover:bg-sky-50/50 dark:hover:bg-sky-950/20',
+    gradientClass: 'from-sky-400 to-sky-600',
+  })
+  if (!isFacilitator) {
+    quickActions.push({
+      label: 'Manage Queue',
+      desc: 'Handle guest queues',
+      icon: Clock,
+      page: 'queue' as const,
+      borderClass: 'border-l-amber-500',
+      hoverClass: 'hover:bg-amber-50/50 dark:hover:bg-amber-950/20',
+      gradientClass: 'from-amber-400 to-amber-600',
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -424,43 +550,19 @@ export default function DashboardPage() {
           ))}
         </div>
       ) : isError ? (
-        <Card className="border-destructive/50">
-          <CardContent className="p-6">
-            <p className="text-sm text-destructive">
-              Failed to load analytics data. Please try again later.
-            </p>
-          </CardContent>
-        </Card>
+        <ErrorCard onRetry={() => refetch()} />
       ) : (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <PrimaryStatCard
-            title="Organizations"
-            value={analytics?.totalOrganizations ?? 0}
-            description="Total registered organizations"
-            icon={Building2}
-            gradient="from-violet-500 to-purple-700"
-          />
-          <PrimaryStatCard
-            title="Active Events"
-            value={analytics?.activeEvents ?? 0}
-            description="Events currently running"
-            icon={Calendar}
-            gradient="from-emerald-500 to-emerald-700"
-          />
-          <PrimaryStatCard
-            title="Completed Sessions"
-            value={analytics?.completedSessions ?? 0}
-            description="Sessions finished successfully"
-            icon={CheckCircle}
-            gradient="from-teal-500 to-cyan-700"
-          />
-          <PrimaryStatCard
-            title="Queue Waiting"
-            value={analytics?.waitingInQueue ?? 0}
-            description="Guests currently in queue"
-            icon={Clock}
-            gradient="from-amber-500 to-amber-700"
-          />
+        <div className={`grid gap-4 grid-cols-1 sm:grid-cols-2 ${primaryStats.length >= 4 ? 'lg:grid-cols-4' : primaryStats.length === 3 ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+          {primaryStats.map((stat) => (
+            <PrimaryStatCard
+              key={stat.title}
+              title={stat.title}
+              value={stat.value}
+              description={stat.description}
+              icon={stat.icon}
+              gradient={stat.gradient}
+            />
+          ))}
         </div>
       )}
 
@@ -471,40 +573,19 @@ export default function DashboardPage() {
             <StatCardSkeleton key={i} />
           ))}
         </div>
-      ) : (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <SecondaryStatCard
-            title="Total Events"
-            value={analytics?.totalEvents ?? 0}
-            icon={Calendar}
-            borderColor="border-l-violet-500"
-            iconBg="bg-violet-100 dark:bg-violet-900/30"
-            iconColor="text-violet-600 dark:text-violet-400"
-          />
-          <SecondaryStatCard
-            title="Total Sessions"
-            value={analytics?.totalSessions ?? 0}
-            icon={Users}
-            borderColor="border-l-emerald-500"
-            iconBg="bg-emerald-100 dark:bg-emerald-900/30"
-            iconColor="text-emerald-600 dark:text-emerald-400"
-          />
-          <SecondaryStatCard
-            title="Gallery Photos"
-            value={analytics?.totalGallery ?? 0}
-            icon={ImageIcon}
-            borderColor="border-l-teal-500"
-            iconBg="bg-teal-100 dark:bg-teal-900/30"
-            iconColor="text-teal-600 dark:text-teal-400"
-          />
-          <SecondaryStatCard
-            title="Total Devices"
-            value={analytics?.totalDevices ?? 0}
-            icon={Monitor}
-            borderColor="border-l-amber-500"
-            iconBg="bg-amber-100 dark:bg-amber-900/30"
-            iconColor="text-amber-600 dark:text-amber-400"
-          />
+      ) : isError ? null : (
+        <div className={`grid gap-4 grid-cols-1 sm:grid-cols-2 ${secondaryStats.length >= 4 ? 'lg:grid-cols-4' : secondaryStats.length === 3 ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+          {secondaryStats.map((stat) => (
+            <SecondaryStatCard
+              key={stat.title}
+              title={stat.title}
+              value={stat.value}
+              icon={stat.icon}
+              borderColor={stat.borderColor}
+              iconBg={stat.iconBg}
+              iconColor={stat.iconColor}
+            />
+          ))}
         </div>
       )}
 
@@ -538,7 +619,7 @@ export default function DashboardPage() {
             </Card>
           </div>
         </div>
-      ) : (
+      ) : isError ? null : (
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Recent Sessions — takes 2/3 width on large screens */}
           <div className="lg:col-span-2">
@@ -559,64 +640,29 @@ export default function DashboardPage() {
       )}
 
       {/* ── Quick Actions ────────────────────────────────────────────────── */}
-      {!isLoading && analytics && (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-          <Card
-            className="cursor-pointer border-l-4 border-l-emerald-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20"
-            onClick={() => setCurrentPage('events')}
-          >
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-sm">
-                <Calendar className="size-5 text-white" />
-              </div>
-              <div>
-                <CardTitle className="text-sm font-medium">
-                  Manage Events
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  View and manage all events
-                </CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
-
-          <Card
-            className="cursor-pointer border-l-4 border-l-sky-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-sky-50/50 dark:hover:bg-sky-950/20"
-            onClick={() => setCurrentPage('sessions')}
-          >
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 shadow-sm">
-                <Camera className="size-5 text-white" />
-              </div>
-              <div>
-                <CardTitle className="text-sm font-medium">
-                  View Sessions
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Browse all photobooth sessions
-                </CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
-
-          <Card
-            className="cursor-pointer border-l-4 border-l-amber-500 transition-all hover:shadow-md hover:-translate-y-0.5 hover:bg-amber-50/50 dark:hover:bg-amber-950/20"
-            onClick={() => setCurrentPage('queue')}
-          >
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 shadow-sm">
-                <Clock className="size-5 text-white" />
-              </div>
-              <div>
-                <CardTitle className="text-sm font-medium">
-                  Manage Queue
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Handle guest queues
-                </CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
+      {!isLoading && !isError && analytics && (
+        <div className={`grid gap-4 grid-cols-1 ${quickActions.length >= 3 ? 'sm:grid-cols-3' : quickActions.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-1'}`}>
+          {quickActions.map((action) => (
+            <Card
+              key={action.label}
+              className={`cursor-pointer border-l-4 ${action.borderClass} transition-all hover:shadow-md hover:-translate-y-0.5 ${action.hoverClass}`}
+              onClick={() => setCurrentPage(action.page)}
+            >
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <div className={`flex size-10 items-center justify-center rounded-lg bg-gradient-to-br ${action.gradientClass} shadow-sm`}>
+                  <action.icon className="size-5 text-white" />
+                </div>
+                <div>
+                  <CardTitle className="text-sm font-medium">
+                    {action.label}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    {action.desc}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+            </Card>
+          ))}
         </div>
       )}
     </div>

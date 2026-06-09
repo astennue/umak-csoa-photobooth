@@ -1,8 +1,27 @@
 import { db } from '@/lib/db'
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils'
 import { NextRequest } from 'next/server'
-import { getAuthContext } from '@/lib/auth'
+import { getAuthContext, getOrgScope } from '@/lib/auth'
 import { decrypt } from '@/lib/crypto'
+
+/**
+ * Determine if the requesting user can see the target user's plain password.
+ * - SUPER_ADMIN: sees ALL passwords
+ * - ORG_ADMIN: sees own password + FACILITATOR passwords in their org only
+ * - FACILITATOR: sees NO passwords
+ */
+function canSeePassword(
+  ctx: { role: string | null; userId: string | null; organizationId: string | null },
+  target: { id: string; role: string; organizationId: string | null }
+): boolean {
+  if (!ctx.role || !ctx.userId) return false
+  if (ctx.role === 'SUPER_ADMIN') return true
+  if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+    if (target.id === ctx.userId) return true
+    return target.organizationId === ctx.organizationId && target.role === 'FACILITATOR'
+  }
+  return false
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +33,7 @@ export async function GET(request: NextRequest) {
     const { page, limit, skip } = paginateRequest(request)
     const searchParams = getSearchParams(request)
     const search = searchParams.get('search') || ''
+    const roleFilter = searchParams.get('role') || ''
 
     const where: any = {}
     if (search) {
@@ -22,14 +42,14 @@ export async function GET(request: NextRequest) {
         { email: { contains: search } },
       ]
     }
-
-    // RBAC: ORG_ADMIN can only see users in their own org
-    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
-      where.organizationId = ctx.organizationId
+    if (roleFilter) {
+      where.role = roleFilter
     }
-    // FACILITATOR can only see users in their own org
-    if (ctx.role === 'FACILITATOR' && ctx.organizationId) {
-      where.organizationId = ctx.organizationId
+
+    // RBAC: ORG_ADMIN and FACILITATOR can only see users in their own org
+    const orgScope = getOrgScope(ctx)
+    if (orgScope) {
+      where.organizationId = orgScope
     }
 
     const [users, total] = await Promise.all([
@@ -58,28 +78,10 @@ export async function GET(request: NextRequest) {
 
     // Add visible passwords based on RBAC
     const usersWithPasswords = users.map((user) => {
-      let visiblePassword: string | null = null
+      const visiblePassword = canSeePassword(ctx, user) && user.plainPassword
+        ? decrypt(user.plainPassword)
+        : null
 
-      if (ctx.role === 'SUPER_ADMIN') {
-        // SUPER_ADMIN can see ALL passwords
-        visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
-      } else if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
-        // ORG_ADMIN can see own password + FACILITATOR passwords in their org
-        // CANNOT see SUPER_ADMIN passwords or other ORG_ADMIN passwords
-        if (user.id === ctx.userId) {
-          // Own password
-          visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
-        } else if (
-          user.organizationId === ctx.organizationId &&
-          user.role === 'FACILITATOR'
-        ) {
-          // FACILITATOR passwords in same org
-          visiblePassword = user.plainPassword ? decrypt(user.plainPassword) : null
-        }
-      }
-      // FACILITATOR cannot see any passwords (visiblePassword stays null)
-
-      // Remove plainPassword from response, add visiblePassword
       const { plainPassword, ...userWithoutPlainPassword } = user
       return {
         ...userWithoutPlainPassword,

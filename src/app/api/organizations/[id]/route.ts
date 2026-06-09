@@ -44,13 +44,13 @@ export async function PUT(
       return errorResponse('Unauthorized', 401);
     }
 
-    const { id } = await params;
-    const body = await request.json();
-
     // RBAC: Only SUPER_ADMIN can edit organizations
     if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can edit organizations', 403);
     }
+
+    const { id } = await params;
+    const body = await request.json();
 
     const existing = await db.organization.findUnique({ where: { id } });
     if (!existing) {
@@ -93,12 +93,12 @@ export async function DELETE(
       return errorResponse('Unauthorized', 401);
     }
 
-    const { id } = await params;
-
     // RBAC: Only SUPER_ADMIN can delete organizations
     if (!isSuperAdmin(ctx)) {
       return errorResponse('Only Super Admins can delete organizations', 403);
     }
+
+    const { id } = await params;
 
     const existing = await db.organization.findUnique({ where: { id } });
     if (!existing) {

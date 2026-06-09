@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
-import { getAuthContext, applyEventOrgFilter, canAccessOrg } from '@/lib/auth';
+import { getAuthContext, canAccessOrg, getOrgScope } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,7 +20,10 @@ export async function GET(request: NextRequest) {
     if (status) where.status = status;
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see sessions for their org's events
-    applyEventOrgFilter(where, ctx.role || '', ctx.organizationId || '');
+    const orgScope = getOrgScope(ctx);
+    if (orgScope) {
+      where.event = { organizationId: orgScope };
+    }
 
     const [items, total] = await Promise.all([
       db.session.findMany({

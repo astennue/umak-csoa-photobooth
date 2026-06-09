@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Badge } from '@/components/ui/badge'
@@ -249,7 +249,10 @@ export default function LiveDisplay() {
   const [selectedBg, setSelectedBg] = useState<string>('none')
   const [customBackgrounds, setCustomBackgrounds] = useState<BackgroundOption[]>([])
 
-  const allBackgrounds = [...BUILT_IN_BACKGROUNDS, ...customBackgrounds]
+  const allBackgrounds = useMemo(
+    () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
+    [customBackgrounds]
+  )
 
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -268,10 +271,20 @@ export default function LiveDisplay() {
     h: DEFAULT_VIDEO_HEIGHT,
   })
 
-  // ── Keep cameraActiveRef in sync ──
+  // ── Refs for stable render loop ──
+  const selectedBgRef = useRef<string>(selectedBg)
+  const allBackgroundsRef = useRef<BackgroundOption[]>(allBackgrounds)
+
+  // ── Keep refs in sync ──
   useEffect(() => {
     cameraActiveRef.current = cameraActive
   }, [cameraActive])
+  useEffect(() => {
+    selectedBgRef.current = selectedBg
+  }, [selectedBg])
+  useEffect(() => {
+    allBackgroundsRef.current = allBackgrounds
+  }, [allBackgrounds])
 
   // ── Initialize MediaPipe segmentation ──
   useEffect(() => {
@@ -293,16 +306,32 @@ export default function LiveDisplay() {
 
         if (cancelled) return
 
-        const segmenter = await ImageSegmenter.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          outputCategoryMask: true,
-          outputConfidenceMasks: false,
-        })
+        let segmenter
+        try {
+          segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          })
+        } catch {
+          // GPU delegate failed, fall back to CPU
+          if (cancelled) return
+          segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              delegate: 'CPU',
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          })
+        }
 
         if (cancelled) {
           segmenter.close()
@@ -345,7 +374,7 @@ export default function LiveDisplay() {
     } else {
       bgImageRef.current = null
     }
-  }, [selectedBg, customBackgrounds])
+  }, [selectedBg, allBackgrounds])
 
   // ── Ensure offscreen canvases ──
   const ensureOffscreenCanvas = useCallback(
@@ -362,10 +391,10 @@ export default function LiveDisplay() {
     []
   )
 
-  // ── Draw background on context ──
+  // ── Draw background on context (uses refs for stable identity) ──
   const drawBackground = useCallback(
     (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-      const bg = allBackgrounds.find((b) => b.id === selectedBg)
+      const bg = allBackgroundsRef.current.find((b) => b.id === selectedBgRef.current)
       if (!bg || bg.type === 'none') {
         ctx.fillStyle = '#0c0a09'
         ctx.fillRect(0, 0, width, height)
@@ -420,7 +449,7 @@ export default function LiveDisplay() {
         ctx.fillRect(0, 0, width, height)
       }
     },
-    [selectedBg, allBackgrounds]
+    []
   )
 
   // ── Process segmentation mask ──
@@ -487,7 +516,7 @@ export default function LiveDisplay() {
 
     const width = canvas.width
     const height = canvas.height
-    const bg = allBackgrounds.find((b) => b.id === selectedBg)
+    const bg = allBackgroundsRef.current.find((b) => b.id === selectedBgRef.current)
     const hasVirtualBg = bg && bg.type !== 'none'
 
     // No virtual bg or no segmentation → just draw mirrored video
@@ -560,7 +589,7 @@ export default function LiveDisplay() {
     }
 
     animFrameRef.current = requestAnimationFrame(renderFrame)
-  }, [selectedBg, segmentationReady, allBackgrounds, drawBackground, processMask, ensureOffscreenCanvas])
+  }, [segmentationReady, drawBackground, processMask, ensureOffscreenCanvas])
 
   // ── Start/stop render loop ──
   useEffect(() => {
@@ -595,6 +624,11 @@ export default function LiveDisplay() {
   const startCamera = useCallback(async () => {
     setCameraError(null)
     setVideoReady(false)
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Camera is not supported in this environment.')
+      return
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({

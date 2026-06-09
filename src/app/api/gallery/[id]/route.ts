@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
-import { getAuthContext, canAccessOrg } from '@/lib/auth';
+import { getAuthContext, canAccessOrg, isFacilitator } from '@/lib/auth';
 
 export async function GET(
   request: NextRequest,
@@ -26,6 +26,7 @@ export async function GET(
       return errorResponse('Gallery item not found', 404);
     }
 
+    // RBAC: ORG_ADMIN and FACILITATOR can only view photos in their org
     if (!canAccessOrg(ctx, item.event.organizationId)) {
       return errorResponse('You can only view photos in your organization', 403);
     }
@@ -56,6 +57,7 @@ export async function PUT(
       return errorResponse('Gallery item not found', 404);
     }
 
+    // RBAC: ORG_ADMIN and FACILITATOR can only edit photos in their org
     if (!canAccessOrg(ctx, existing.event.organizationId)) {
       return errorResponse('You can only edit photos in your organization', 403);
     }
@@ -92,6 +94,11 @@ export async function DELETE(
       return errorResponse('Unauthorized', 401);
     }
 
+    // RBAC: FACILITATOR cannot delete gallery items
+    if (isFacilitator(ctx)) {
+      return errorResponse('Facilitators cannot delete photos', 403);
+    }
+
     const { id } = await params;
     const existing = await db.gallery.findUnique({
       where: { id },
@@ -102,6 +109,7 @@ export async function DELETE(
       return errorResponse('Gallery item not found', 404);
     }
 
+    // RBAC: ORG_ADMIN can only delete photos in their org
     if (!canAccessOrg(ctx, existing.event.organizationId)) {
       return errorResponse('You can only delete photos in your organization', 403);
     }

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
-import { getAuthContext } from '@/lib/auth';
+import { getAuthContext, getOrgScope } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,20 +11,33 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = new URL(request.url).searchParams;
-    const organizationId = searchParams.get('organizationId') || '';
-    const eventId = searchParams.get('eventId') || '';
+    const queryOrgId = searchParams.get('organizationId') || '';
+    const queryEventId = searchParams.get('eventId') || '';
 
     // RBAC: ORG_ADMIN and FACILITATOR can only see analytics for their own org
-    const effectiveOrgId = (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR')
-      ? ctx.organizationId
-      : organizationId;
+    // SUPER_ADMIN can optionally filter by orgId or see everything
+    const orgScope = getOrgScope(ctx);
+    const effectiveOrgId = orgScope ?? (queryOrgId || undefined);
 
     const eventWhere: any = {};
     if (effectiveOrgId) eventWhere.organizationId = effectiveOrgId;
-    if (eventId) eventWhere.id = eventId;
+    if (queryEventId) eventWhere.id = queryEventId;
 
-    const sessionEventWhere: any = {};
-    if (effectiveOrgId) sessionEventWhere.organizationId = effectiveOrgId;
+    const sessionWhere: any = {};
+    if (effectiveOrgId) sessionWhere.event = { organizationId: effectiveOrgId };
+    if (queryEventId) sessionWhere.eventId = queryEventId;
+
+    const queueWhere: any = {};
+    if (effectiveOrgId) queueWhere.event = { organizationId: effectiveOrgId };
+    if (queryEventId) queueWhere.eventId = queryEventId;
+
+    const galleryWhere: any = {};
+    if (effectiveOrgId) galleryWhere.event = { organizationId: effectiveOrgId };
+    if (queryEventId) galleryWhere.eventId = queryEventId;
+
+    const deviceWhere: any = {};
+    if (effectiveOrgId) deviceWhere.event = { organizationId: effectiveOrgId };
+    if (queryEventId) deviceWhere.eventId = queryEventId;
 
     const [
       totalOrganizations,
@@ -39,67 +52,26 @@ export async function GET(request: NextRequest) {
       totalGallery,
       totalDevices,
     ] = await Promise.all([
-      (ctx.role === 'ORG_ADMIN' || ctx.role === 'FACILITATOR')
-        ? db.organization.count({ where: { id: effectiveOrgId || 'none' } })
+      // ORG_ADMIN/FACILITATOR see count 1 (their org), SUPER_ADMIN sees all
+      orgScope
+        ? db.organization.count({ where: { id: orgScope } })
         : db.organization.count(),
       db.event.count({ where: eventWhere }),
-      db.session.count({
-        where: effectiveOrgId
-          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
-          : eventId ? { eventId } : {},
-      }),
-      db.queueEntry.count({
-        where: effectiveOrgId
-          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
-          : eventId ? { eventId } : {},
-      }),
+      db.session.count({ where: sessionWhere }),
+      db.queueEntry.count({ where: queueWhere }),
       db.event.count({ where: { ...eventWhere, status: 'ACTIVE' } }),
-      db.session.count({
-        where: {
-          status: 'COMPLETED',
-          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
-          ...(eventId ? { eventId } : {}),
-        },
-      }),
-      db.queueEntry.count({
-        where: {
-          status: 'WAITING',
-          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
-          ...(eventId ? { eventId } : {}),
-        },
-      }),
-      db.queueEntry.count({
-        where: {
-          status: 'ACTIVE',
-          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
-          ...(eventId ? { eventId } : {}),
-        },
-      }),
-      db.queueEntry.count({
-        where: {
-          status: 'COMPLETED',
-          ...(effectiveOrgId ? { event: { organizationId: effectiveOrgId } } : {}),
-          ...(eventId ? { eventId } : {}),
-        },
-      }),
-      db.gallery.count({
-        where: effectiveOrgId
-          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
-          : eventId ? { eventId } : {},
-      }),
-      db.device.count({
-        where: effectiveOrgId
-          ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
-          : eventId ? { eventId } : {},
-      }),
+      db.session.count({ where: { ...sessionWhere, status: 'COMPLETED' } }),
+      db.queueEntry.count({ where: { ...queueWhere, status: 'WAITING' } }),
+      db.queueEntry.count({ where: { ...queueWhere, status: 'ACTIVE' } }),
+      db.queueEntry.count({ where: { ...queueWhere, status: 'COMPLETED' } }),
+      db.gallery.count({ where: galleryWhere }),
+      db.device.count({ where: deviceWhere }),
     ]);
 
     const recentSessions = await db.session.findMany({
       take: 5,
       orderBy: { createdAt: 'desc' },
-      where: effectiveOrgId
-        ? { event: { organizationId: effectiveOrgId }, ...(eventId ? { eventId } : {}) }
-        : eventId ? { eventId } : {},
+      where: sessionWhere,
       include: { event: { select: { id: true, name: true } } },
     });
 
@@ -116,7 +88,7 @@ export async function GET(request: NextRequest) {
       totalGallery,
       totalDevices,
       recentSessions,
-    }, 200);
+    });
   } catch (err: any) {
     return errorResponse(err.message, 500);
   }

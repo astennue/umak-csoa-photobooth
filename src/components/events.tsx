@@ -266,7 +266,7 @@ export default function EventsPage() {
   const [endPickerOpen, setEndPickerOpen] = useState(false)
 
   // Queries
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['events', page, limit, debouncedSearch, filterOrgId, filterStatus, currentRole, currentOrgId],
     queryFn: () => fetchEvents({
       page,
@@ -277,11 +277,13 @@ export default function EventsPage() {
       userRole: currentRole,
       userOrgId: currentOrgId,
     }),
+    retry: 2,
   })
 
   const { data: orgsData } = useQuery({
     queryKey: ['organizations-list', currentRole, currentOrgId],
     queryFn: () => fetchOrganizationsForFilter(currentRole, currentOrgId),
+    retry: 2,
   })
 
   const organizations = orgsData ?? []
@@ -451,6 +453,15 @@ export default function EventsPage() {
             </Card>
           ))}
         </div>
+      ) : isError ? (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-destructive">Failed to load events.</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-4">

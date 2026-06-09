@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-utils'
-import { getAuthContext } from '@/lib/auth'
+import { getAuthContext, isSuperAdmin, isOrgAdmin, isFacilitator } from '@/lib/auth'
 import { encrypt } from '@/lib/crypto'
 
 export async function POST(request: NextRequest) {
@@ -27,34 +27,43 @@ export async function POST(request: NextRequest) {
     }
 
     // RBAC: FACILITATOR cannot create any accounts
-    if (ctx.role === 'FACILITATOR') {
+    if (isFacilitator(ctx)) {
       return errorResponse('Facilitators cannot create user accounts', 403)
     }
 
-    // RBAC: ORG_ADMIN can only create FACILITATOR accounts
-    if (ctx.role === 'ORG_ADMIN' && role !== 'FACILITATOR') {
-      return errorResponse('Organization Admins can only create Facilitator accounts', 403)
+    // RBAC: ORG_ADMIN can only create FACILITATOR accounts in their own org
+    if (isOrgAdmin(ctx)) {
+      if (role !== 'FACILITATOR') {
+        return errorResponse('Organization Admins can only create Facilitator accounts', 403)
+      }
+      if (role === 'SUPER_ADMIN') {
+        return errorResponse('Organization Admins cannot create Super Admin accounts', 403)
+      }
     }
 
-    // RBAC: ORG_ADMIN must assign to their own org
+    // Determine the effective organizationId
     let effectiveOrgId = organizationId
-    if (ctx.role === 'ORG_ADMIN' && ctx.organizationId) {
+    if (isOrgAdmin(ctx) && ctx.organizationId) {
+      // ORG_ADMIN must assign to their own org (ignore any provided orgId)
       effectiveOrgId = ctx.organizationId
     }
 
-    // RBAC: ORG_ADMIN cannot create SUPER_ADMIN
-    if (ctx.role === 'ORG_ADMIN' && role === 'SUPER_ADMIN') {
-      return errorResponse('Organization Admins cannot create Super Admin accounts', 403)
-    }
-
     // SUPER_ADMIN creating ORG_ADMIN must specify organization
-    if (ctx.role === 'SUPER_ADMIN' && role === 'ORG_ADMIN' && !organizationId) {
+    if (isSuperAdmin(ctx) && role === 'ORG_ADMIN' && !organizationId) {
       return errorResponse('Organization is required when creating an Org Admin account')
     }
 
     // SUPER_ADMIN creating FACILITATOR must specify organization
-    if (ctx.role === 'SUPER_ADMIN' && role === 'FACILITATOR' && !organizationId) {
+    if (isSuperAdmin(ctx) && role === 'FACILITATOR' && !organizationId) {
       return errorResponse('Organization is required when creating a Facilitator account')
+    }
+
+    // Verify the organization exists when specified
+    if (effectiveOrgId) {
+      const org = await db.organization.findUnique({ where: { id: effectiveOrgId } })
+      if (!org) {
+        return errorResponse('Organization not found')
+      }
     }
 
     // Check email uniqueness
