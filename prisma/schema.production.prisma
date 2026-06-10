@@ -1,0 +1,173 @@
+// ── Production Schema for Supabase PostgreSQL ────────────────────────────
+// This is the PostgreSQL-compatible version of the Prisma schema.
+// To deploy with Supabase:
+// 1. Rename this file to schema.prisma (replacing the SQLite version)
+// 2. Set the DATABASE_URL and DIRECT_URL in .env to your Supabase connection strings
+// 3. Run: npx prisma db push
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  password       String
+  plainPassword  String?  // AES-256 encrypted, viewable by authorized admins
+  name           String
+  role           String   @default("FACILITATOR") // SUPER_ADMIN, ORG_ADMIN, FACILITATOR
+  organizationId String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  auditLogs    AuditLog[]
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  logoUrl     String?
+  email       String?
+  phone       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events    Event[]
+  auditLogs AuditLog[]
+  users     User[]
+}
+
+model Event {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  organizationId String
+  location       String?
+  startDate      DateTime
+  endDate        DateTime?
+  status         String   @default("DRAFT")
+  maxSessions    Int      @default(100)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+  queueEntries QueueEntry[]
+  templates    Template[]
+  gallery      Gallery[]
+  eventAuditLogs AuditLog[]
+  devices      Device[]
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  eventId     String
+  guestName   String
+  guestEmail  String?
+  guestPhone  String?
+  status      String   @default("SCHEDULED")
+  notes       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event           Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  queueEntries    QueueEntry[]
+  gallery         Gallery[]
+  sessionAuditLogs AuditLog[]
+}
+
+model QueueEntry {
+  id          String    @id @default(cuid())
+  eventId     String
+  sessionId   String?
+  position    Int
+  status      String    @default("WAITING")
+  name        String
+  email       String?
+  phone       String?
+  notifiedAt  DateTime?
+  activatedAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  event        Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  queueSession Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  eventId     String
+  name        String
+  description String?
+  frameUrl    String?
+  overlayUrl  String?
+  settings    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model Gallery {
+  id           String   @id @default(cuid())
+  eventId      String
+  sessionId    String?
+  photoUrl     String
+  thumbnailUrl String?
+  caption      String?
+  isPublic     Boolean  @default(true)
+  isFavorite   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  event          Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  gallerySession Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?
+  eventId        String?
+  sessionId      String?
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String?
+  details        String?
+  performedBy    String?
+  createdAt      DateTime @default(now())
+
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  auditLogEvent  Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  auditLogSession Session?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Device {
+  id            String    @id @default(cuid())
+  eventId       String
+  name          String
+  type          String    @default("PHOTOBOOTH")
+  status        String    @default("OFFLINE")
+  lastHeartbeat DateTime?
+  ipAddress     String?
+  firmware      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}

@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
+import { useAppStore } from '@/lib/store'
 import {
   Palette,
   Plus,
@@ -858,17 +859,190 @@ export default function TemplatesPage() {
 
   const isPending = createMutation.isPending || updateMutation.isPending
 
-  // FACILITATOR: show restricted message
+  // FACILITATOR: show read-only template browser with selection
   if (isFacilitatorRole) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-4">
-        <div className="rounded-full bg-emerald-100 dark:bg-emerald-900/30 p-4">
-          <Palette className="size-8 text-emerald-600 dark:text-emerald-400" />
+      <div className="space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
+          <p className="text-muted-foreground">Browse and select photo templates for your events.</p>
         </div>
-        <h2 className="text-xl font-semibold">Access Restricted</h2>
-        <p className="text-muted-foreground text-center max-w-sm">
-          Facilitators do not have access to template management. Contact your organization admin for assistance.
-        </p>
+
+        {/* Info banner */}
+        <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4 flex items-start gap-3">
+          <Palette className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">View-Only Access</p>
+            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+              You can browse and use templates created by your organization admin. To create or edit templates, contact your admin.
+            </p>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-2">
+            <Filter className="size-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-muted-foreground">Filter:</span>
+          </div>
+          <Select value={filterEventId} onValueChange={(val) => { setFilterEventId(val); setPage(1) }}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="All Events" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Events</SelectItem>
+              {events.map((e) => (
+                <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {filterEventId !== 'all' && (
+            <Button variant="ghost" size="sm" onClick={() => { setFilterEventId('all'); setPage(1) }} className="gap-1">
+              <X className="size-3" />
+              Clear
+            </Button>
+          )}
+        </div>
+
+        {/* Templates Grid */}
+        {isLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-5 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-2/3" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : isError ? (
+          <Card className="border-destructive/50">
+            <CardContent className="p-6 flex flex-col items-center gap-3">
+              <p className="text-sm text-destructive">Failed to load templates.</p>
+              <Button variant="outline" size="sm" onClick={() => refetchTemplates()}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : templates.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Palette className="size-12 text-emerald-400/60 mb-4" />
+              <h3 className="text-lg font-medium">No templates found</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                No templates have been created yet. Ask your organization admin to create one.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {templates.map((template) => (
+              <Card key={template.id} className={`hover:shadow-md transition-shadow border-l-4 ${template.active ? 'border-l-emerald-500' : 'border-l-gray-400'} overflow-hidden`}>
+                {/* Preview */}
+                <div className="px-4 pt-4">
+                  <MiniTemplatePreview template={template} />
+                </div>
+
+                <CardHeader className="pb-2 pt-3">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <CardTitle className="text-base truncate">{template.name}</CardTitle>
+                      <CardDescription className="truncate">{template.event.name}</CardDescription>
+                    </div>
+                    <Badge
+                      variant={template.active ? 'default' : 'secondary'}
+                      className={`ml-2 shrink-0 gap-1 ${
+                        template.active
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20'
+                          : 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/20'
+                      }`}
+                    >
+                      {template.active ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
+                      {template.active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  {template.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">{template.description}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5">
+                    {template.layout && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <LayoutGrid className="size-3" />
+                        {template.layout}
+                      </Badge>
+                    )}
+                    {template.captureMode === 'auto' && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <Timer className="size-3" />
+                        Auto {template.captureDelay}s
+                      </Badge>
+                    )}
+                    {template.includeGif && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <Camera className="size-3" />
+                        GIF
+                      </Badge>
+                    )}
+                    {template.printAuto && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <Printer className="size-3" />
+                        Auto Print
+                      </Badge>
+                    )}
+                    {template.emailAuto && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <Mail className="size-3" />
+                        Auto Email
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(template.createdAt), 'MMM d, yyyy')}
+                    </span>
+                    <Button
+                      size="sm"
+                      className="gap-1.5 h-8 text-xs bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                      onClick={() => {
+                        const { setCurrentPage } = useAppStore.getState()
+                        setCurrentPage('live-display')
+                        toast.success('Template selected', { description: `Using "${template.name}" — go to Live Display to start capturing.` })
+                      }}
+                    >
+                      <Camera className="size-3.5" />
+                      Use Template
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-4">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Previous
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {page} of {totalPages}
+            </span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        )}
       </div>
     )
   }

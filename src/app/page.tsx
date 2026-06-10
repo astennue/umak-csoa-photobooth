@@ -79,7 +79,7 @@ function getNavItems(role?: string): NavItem[] {
     { page: 'sessions', label: 'Sessions', icon: Users, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
     { page: 'queue', label: 'Queue', icon: ListOrdered, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
     { page: 'gallery', label: 'Gallery', icon: ImageIcon, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
-    { page: 'templates', label: 'Templates', icon: Palette, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+    { page: 'templates', label: 'Templates', icon: Palette, roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'FACILITATOR'] },
     { page: 'devices', label: 'Devices', icon: Monitor, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
     { page: 'audit', label: 'Audit Log', icon: ScrollText, roles: ['SUPER_ADMIN'] },
     { page: 'users', label: 'Users', icon: UserCog, roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },

@@ -288,7 +288,7 @@ export default function LiveDisplay() {
           if (cancelled) return
           segmenter = await ImageSegmenter.createFromOptions(vision, {
             baseOptions: {
-              modelAssetFile: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+              modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
               delegate: 'CPU',
             },
             runningMode: 'VIDEO',
@@ -424,9 +424,10 @@ export default function LiveDisplay() {
     []
   )
 
-  // ── Process segmentation mask (async) ──
-  // Uses createImageBitmap() to force a synchronous pixel copy from WebGL canvas
-  // before the framebuffer gets cleared — the root cause of "AI Separation Failed".
+  // ── Process segmentation mask ──
+  // CRITICAL: We try SYNCHRONOUS strategies first because the WebGL framebuffer
+  // can be recycled by the next segmentForVideo() call before async strategies resolve.
+  // Only fall back to async createImageBitmap if sync methods fail.
   const processMaskAsync = useCallback(
     async (categoryMask: any, width: number, height: number): Promise<HTMLCanvasElement | null> => {
       try {
@@ -441,28 +442,32 @@ export default function LiveDisplay() {
 
         let drawSucceeded = false
 
-        // Strategy 1: Use createImageBitmap on categoryMask.canvas — forces immediate
-        // pixel copy from WebGL canvas before framebuffer is cleared.
-        if (!drawSucceeded && categoryMask?.canvas) {
-          try {
-            const bitmap = await createImageBitmap(categoryMask.canvas)
-            maskCtx.drawImage(bitmap, 0, 0, width, height)
-            bitmap.close()
-            drawSucceeded = true
-          } catch { /* fallthrough */ }
-        }
+        // === SYNCHRONOUS STRATEGIES (tried first — no await, no WebGL recycling risk) ===
 
-        // Strategy 2: Use createImageBitmap on categoryMask directly
+        // Strategy 1: Synchronous drawImage from categoryMask directly (MPImage is a valid ImageBitmapSource)
         if (!drawSucceeded) {
           try {
-            const bitmap = await createImageBitmap(categoryMask)
-            maskCtx.drawImage(bitmap, 0, 0, width, height)
-            bitmap.close()
-            drawSucceeded = true
+            maskCtx.drawImage(categoryMask, 0, 0, width, height)
+            // Verify pixels were actually drawn
+            const testPixel = maskCtx.getImageData(0, 0, 1, 1).data
+            if (testPixel[3] > 0 || testPixel[0] > 0 || testPixel[1] > 0 || testPixel[2] > 0) {
+              drawSucceeded = true
+            }
           } catch { /* fallthrough */ }
         }
 
-        // Strategy 3: Try MPImage's getImageData() method
+        // Strategy 2: Synchronous drawImage from categoryMask.canvas
+        if (!drawSucceeded && categoryMask?.canvas) {
+          try {
+            maskCtx.drawImage(categoryMask.canvas, 0, 0, width, height)
+            const testPixel = maskCtx.getImageData(0, 0, 1, 1).data
+            if (testPixel[3] > 0 || testPixel[0] > 0 || testPixel[1] > 0 || testPixel[2] > 0) {
+              drawSucceeded = true
+            }
+          } catch { /* fallthrough */ }
+        }
+
+        // Strategy 3: Try MPImage's getImageData() method (synchronous)
         if (!drawSucceeded) {
           try {
             if (typeof categoryMask?.getImageData === 'function') {
@@ -473,7 +478,7 @@ export default function LiveDisplay() {
           } catch { /* fallthrough */ }
         }
 
-        // Strategy 4: Try using categoryMask as raw typed array with width/height
+        // Strategy 4: Try using categoryMask as raw typed array with width/height (synchronous)
         if (!drawSucceeded) {
           try {
             const maskWidth = categoryMask?.width ?? width
@@ -496,6 +501,34 @@ export default function LiveDisplay() {
                 imgData.data[i * 4 + 3] = 255
               }
               maskCtx.putImageData(imgData, 0, 0)
+              drawSucceeded = true
+            }
+          } catch { /* fallthrough */ }
+        }
+
+        // === ASYNC STRATEGIES (fallback — may fail if WebGL framebuffer is recycled) ===
+
+        // Strategy 5: Use createImageBitmap on categoryMask.canvas
+        if (!drawSucceeded && categoryMask?.canvas) {
+          try {
+            const bitmap = await createImageBitmap(categoryMask.canvas)
+            maskCtx.drawImage(bitmap, 0, 0, width, height)
+            bitmap.close()
+            const testPixel = maskCtx.getImageData(0, 0, 1, 1).data
+            if (testPixel[3] > 0 || testPixel[0] > 0 || testPixel[1] > 0 || testPixel[2] > 0) {
+              drawSucceeded = true
+            }
+          } catch { /* fallthrough */ }
+        }
+
+        // Strategy 6: Use createImageBitmap on categoryMask directly
+        if (!drawSucceeded) {
+          try {
+            const bitmap = await createImageBitmap(categoryMask)
+            maskCtx.drawImage(bitmap, 0, 0, width, height)
+            bitmap.close()
+            const testPixel = maskCtx.getImageData(0, 0, 1, 1).data
+            if (testPixel[3] > 0 || testPixel[0] > 0 || testPixel[1] > 0 || testPixel[2] > 0) {
               drawSucceeded = true
             }
           } catch { /* fallthrough */ }
