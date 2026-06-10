@@ -788,9 +788,11 @@ export default function TemplatesPage() {
       setForm((f) => ({ ...f, stripImageUrl: json.data.url }))
       toast.success('Image uploaded')
     } catch (err: any) {
+      console.error('Upload error:', err)
       toast.error('Upload failed', { description: err.message })
     } finally {
       setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -842,6 +844,35 @@ export default function TemplatesPage() {
       placeholders: f.placeholders.filter((_, i) => i !== index),
     }))
     setSelectedPlaceholder(null)
+  }
+
+  function handleNextStep() {
+    if (currentStep === 1) {
+      if (!form.eventId || !form.name.trim()) {
+        toast.error('Validation Error', { description: 'Event and Name are required before proceeding.' })
+        return
+      }
+    }
+    if (currentStep === 2) {
+      if (uploading) {
+        toast.error('Please wait', { description: 'An upload is in progress. Please wait for it to complete.' })
+        return
+      }
+    }
+    setCurrentStep((s) => s + 1)
+  }
+
+  function handleSaveDraft() {
+    if (!form.eventId || !form.name.trim()) {
+      toast.error('Validation Error', { description: 'Event and Name are required to save.' })
+      if (currentStep !== 1) setCurrentStep(1)
+      return
+    }
+    if (isEditing && editingTemplateId) {
+      updateMutation.mutate({ id: editingTemplateId, data: form })
+    } else {
+      createMutation.mutate(form)
+    }
   }
 
   function handleSubmit() {
@@ -1285,7 +1316,17 @@ export default function TemplatesPage() {
       </AlertDialog>
 
       {/* Create/Edit Template Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); else setDialogOpen(true) }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          const hasUnsavedData = form.name.trim() !== '' || form.stripImageUrl !== ''
+          if (hasUnsavedData) {
+            if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) return
+          }
+          closeDialog()
+        } else {
+          setDialogOpen(true)
+        }
+      }}>
         <DialogContent className="sm:max-w-[700px] max-h-[90vh] p-0">
           <DialogHeader className="px-6 pt-6 pb-0">
             <DialogTitle>{isEditing ? 'Edit Template' : 'Create Template'}</DialogTitle>
@@ -1438,13 +1479,18 @@ export default function TemplatesPage() {
                     </div>
                   )}
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
-                    className="hidden"
-                    onChange={handleFileInput}
-                  />
+                  <div className="flex justify-center mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                    >
+                      <Upload className="size-3.5" />
+                      {uploading ? 'Uploading...' : 'Upload Image'}
+                    </Button>
+                  </div>
 
                   <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
                     <p className="font-medium flex items-center gap-1.5">
@@ -1759,8 +1805,16 @@ export default function TemplatesPage() {
                 <Button variant="outline" onClick={closeDialog}>
                   Cancel
                 </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleSaveDraft}
+                  disabled={isPending}
+                  className="gap-1"
+                >
+                  {isPending ? 'Saving...' : 'Save'}
+                </Button>
                 {currentStep < 4 ? (
-                  <Button onClick={() => setCurrentStep((s) => s + 1)} className="gap-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
+                  <Button onClick={handleNextStep} className="gap-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white">
                     Next
                     <ChevronRight className="size-4" />
                   </Button>
@@ -1772,8 +1826,15 @@ export default function TemplatesPage() {
               </div>
             </div>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+          className="hidden"
+          onChange={handleFileInput}
+        />
+      </DialogContent>
+    </Dialog>
     </div>
   )
 }
