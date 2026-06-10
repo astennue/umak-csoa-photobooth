@@ -389,17 +389,15 @@ function PlaceholderCanvas({
     <div className="flex justify-center">
       <div
         ref={canvasRef}
-        className="relative border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
-        style={!stripImageUrl ? { aspectRatio: imageAspect, maxHeight: '520px', width: '100%' } : undefined}
+        className="relative inline-block max-w-full border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
         onClick={handleCanvasClick}
       >
-        {/* Strip Image Background */}
+        {/* Strip Image Background — this element determines the container size */}
         {stripImageUrl ? (
           <img
             src={stripImageUrl}
             alt="Strip design"
-            className="block max-h-[520px] max-w-full w-auto object-contain pointer-events-none"
-            style={{ aspectRatio: imageAspect }}
+            className="block max-h-[520px] max-w-full object-fill pointer-events-none"
             draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget
@@ -409,7 +407,10 @@ function PlaceholderCanvas({
             }}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div
+            className="flex items-center justify-center"
+            style={{ aspectRatio: imageAspect, maxHeight: '520px', width: '100%', minWidth: '200px' }}
+          >
             <div className="text-center text-muted-foreground/50">
               <ImageIcon className="size-12 mx-auto mb-2" />
               <p className="text-sm">Upload a strip design</p>
@@ -494,16 +495,12 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
 
   return (
     <div className="flex justify-center">
-      <div
-        className="relative bg-muted/50 rounded-md overflow-hidden"
-        style={!imageUrl ? { aspectRatio: imageAspect, maxHeight: '280px', width: '100%' } : undefined}
-      >
+      <div className="relative inline-block max-w-full bg-muted/50 rounded-md overflow-hidden">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={template.name}
-            className="block max-h-[280px] max-w-full w-auto object-contain"
-            style={{ aspectRatio: imageAspect }}
+            className="block max-h-[280px] max-w-full object-fill"
             draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget
@@ -513,7 +510,10 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
             }}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div
+            className="flex items-center justify-center"
+            style={{ aspectRatio: imageAspect, maxHeight: '280px', width: '100%', minWidth: '80px' }}
+          >
             <Frame className="size-8 text-muted-foreground/40" />
           </div>
         )}
