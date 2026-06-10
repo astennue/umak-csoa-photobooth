@@ -1066,107 +1066,139 @@ export default function LiveDisplay() {
     // Determine canvas dimensions from the strip image's natural size
     const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
 
-    const doComposite = (ctx: CanvasRenderingContext2D, stripW: number, stripH: number) => {
-      // Draw each captured photo into its placeholder
-      placeholders.forEach((ph: PlaceholderDef, i: number) => {
-        const photoDataUrl = templatePhotos[i]
-        if (!photoDataUrl) return
-
+    // Helper: load an image and return a Promise
+    const loadImage = (src: string, crossOrigin?: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
         const img = new Image()
-        img.onload = () => {
-          const px = (ph.x / 100) * stripW
-          const py = (ph.y / 100) * stripH
-          const pw = (ph.width / 100) * stripW
-          const phh = (ph.height / 100) * stripH
-          const br = (ph.borderRadius ?? 0) / 100 * Math.min(pw, phh)
-
-          ctx.save()
-          if (br > 0) {
-            ctx.beginPath()
-            ctx.roundRect(px, py, pw, phh, br)
-            ctx.clip()
-          }
-
-          // Cover-fit: center crop the image to fill the placeholder
-          const imgAspect = img.width / img.height
-          const slotAspect = pw / phh
-          let sx = 0, sy = 0, sw = img.width, sh = img.height
-          if (imgAspect > slotAspect) {
-            sw = img.height * slotAspect
-            sx = (img.width - sw) / 2
-          } else {
-            sh = img.width / slotAspect
-            sy = (img.height - sh) / 2
-          }
-          ctx.drawImage(img, sx, sy, sw, sh, px, py, pw, phh)
-          ctx.restore()
-        }
-        img.src = photoDataUrl
+        if (crossOrigin) img.crossOrigin = crossOrigin
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error(`Failed to load image: ${src.substring(0, 80)}`))
+        img.src = src
       })
     }
 
-    const finalizeComposite = () => {
-      setTimeout(() => {
-        const dataUrl = canvas.toDataURL('image/png')
-        setCompositeImage(dataUrl)
-        setShowComposite(true)
-        onCompositeReady(dataUrl)
-      }, 500)
+    // Draw a single captured photo into its placeholder (cover-fit with optional clip)
+    const drawPhotoIntoPlaceholder = (
+      ctx: CanvasRenderingContext2D,
+      img: HTMLImageElement,
+      ph: PlaceholderDef,
+      stripW: number,
+      stripH: number
+    ) => {
+      const px = (ph.x / 100) * stripW
+      const py = (ph.y / 100) * stripH
+      const pw = (ph.width / 100) * stripW
+      const phh = (ph.height / 100) * stripH
+      // borderRadius is stored as a pixel value, not a percentage
+      const br = ph.borderRadius ?? 0
+
+      ctx.save()
+      if (br > 0) {
+        ctx.beginPath()
+        ctx.roundRect(px, py, pw, phh, br)
+        ctx.clip()
+      }
+
+      // Cover-fit: center crop the image to fill the placeholder
+      const imgAspect = img.width / img.height
+      const slotAspect = pw / phh
+      let sx = 0, sy = 0, sw = img.width, sh = img.height
+      if (imgAspect > slotAspect) {
+        sw = img.height * slotAspect
+        sx = (img.width - sw) / 2
+      } else {
+        sh = img.width / slotAspect
+        sy = (img.height - sh) / 2
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, px, py, pw, phh)
+      ctx.restore()
     }
 
-    // If template has strip image, load it first to get dimensions and draw as background
-    if (stripUrl) {
-      const stripImg = new Image()
-      stripImg.crossOrigin = 'anonymous'
-      stripImg.onload = () => {
-        canvas.width = stripImg.naturalWidth || DEFAULT_STRIP_WIDTH
-        canvas.height = stripImg.naturalHeight || DEFAULT_STRIP_HEIGHT
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
+    const finalizeComposite = () => {
+      const dataUrl = canvas.toDataURL('image/png')
+      setCompositeImage(dataUrl)
+      setShowComposite(true)
+      onCompositeReady(dataUrl)
+    }
 
-        // Draw strip background (white default)
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
+    // Main async composite generation
+    const runComposite = async () => {
+      let stripW = DEFAULT_STRIP_WIDTH
+      let stripH = DEFAULT_STRIP_HEIGHT
 
-        // Draw the strip template image
-        ctx.drawImage(stripImg, 0, 0, canvas.width, canvas.height)
-        doComposite(ctx, canvas.width, canvas.height)
+      // If template has strip image, load it first to get dimensions and draw as background
+      if (stripUrl) {
+        try {
+          const stripImg = await loadImage(stripUrl, 'anonymous')
+          stripW = stripImg.naturalWidth || DEFAULT_STRIP_WIDTH
+          stripH = stripImg.naturalHeight || DEFAULT_STRIP_HEIGHT
 
-        // Draw overlay if exists
-        if (selectedTemplate.overlayUrl) {
-          const overlayImg = new Image()
-          overlayImg.crossOrigin = 'anonymous'
-          overlayImg.onload = () => {
-            ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height)
-            finalizeComposite()
-          }
-          overlayImg.src = selectedTemplate.overlayUrl
-        } else {
-          finalizeComposite()
+          canvas.width = stripW
+          canvas.height = stripH
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return
+
+          // Draw strip background (white default)
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, stripW, stripH)
+
+          // Draw the strip template image at its natural dimensions
+          ctx.drawImage(stripImg, 0, 0, stripW, stripH)
+        } catch {
+          // Fallback: use default dimensions
+          canvas.width = DEFAULT_STRIP_WIDTH
+          canvas.height = DEFAULT_STRIP_HEIGHT
+          stripW = DEFAULT_STRIP_WIDTH
+          stripH = DEFAULT_STRIP_HEIGHT
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, stripW, stripH)
         }
-      }
-      stripImg.onerror = () => {
-        // Fallback: use default dimensions
+      } else {
         canvas.width = DEFAULT_STRIP_WIDTH
         canvas.height = DEFAULT_STRIP_HEIGHT
         const ctx = canvas.getContext('2d')
         if (!ctx) return
         ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        doComposite(ctx, canvas.width, canvas.height)
-        finalizeComposite()
+        ctx.fillRect(0, 0, stripW, stripH)
       }
-      stripImg.src = stripUrl
-    } else {
-      canvas.width = DEFAULT_STRIP_WIDTH
-      canvas.height = DEFAULT_STRIP_HEIGHT
+
+      // Load all captured photos in parallel, then draw them sequentially
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      doComposite(ctx, canvas.width, canvas.height)
+
+      const photoPromises = placeholders.map((ph: PlaceholderDef, i: number) => {
+        const photoDataUrl = templatePhotos[i]
+        if (!photoDataUrl) return Promise.resolve(null)
+        return loadImage(photoDataUrl).catch(() => null)
+      })
+
+      const photoImages = await Promise.all(photoPromises)
+
+      // Draw each photo into its placeholder (sequential to maintain z-order)
+      photoImages.forEach((img, i) => {
+        if (!img) return
+        drawPhotoIntoPlaceholder(ctx, img, placeholders[i], stripW, stripH)
+      })
+
+      // Draw overlay if exists
+      if (selectedTemplate.overlayUrl) {
+        try {
+          const overlayImg = await loadImage(selectedTemplate.overlayUrl, 'anonymous')
+          ctx.drawImage(overlayImg, 0, 0, stripW, stripH)
+        } catch {
+          // Skip overlay if it fails to load
+        }
+      }
+
       finalizeComposite()
     }
+
+    runComposite().catch((err) => {
+      console.error('[generateComposite] Error:', err)
+      toast.error('Failed to generate composite image')
+    })
   }, [selectedTemplate, templatePhotos])
 
   // ── Called when composite is ready — auto-print/email ──
@@ -1567,7 +1599,7 @@ export default function LiveDisplay() {
                         width: `${ph.width}%`,
                         height: `${ph.height}%`,
                         borderColor: filled ? 'rgba(52, 211, 153, 0.7)' : 'rgba(255, 255, 255, 0.5)',
-                        borderRadius: `${ph.borderRadius ?? 0}%`,
+                        borderRadius: `${ph.borderRadius ?? 0}px`,
                         backgroundColor: filled ? 'rgba(52, 211, 153, 0.15)' : 'rgba(0, 0, 0, 0.25)',
                       }}
                     >
