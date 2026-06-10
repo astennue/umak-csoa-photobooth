@@ -9,6 +9,9 @@ interface AppState {
   setSelectedEventId: (id: string | null) => void
   activeSession: { id: string; guestName: string; eventId: string } | null
   setActiveSession: (session: { id: string; guestName: string; eventId: string } | null) => void
+  // Template selection — used to pass a chosen template from Templates page to Live Display
+  selectedTemplateId: string | null
+  setSelectedTemplateId: (id: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -18,6 +21,8 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedEventId: (id) => set({ selectedEventId: id }),
   activeSession: null,
   setActiveSession: (session) => set({ activeSession: session }),
+  selectedTemplateId: null,
+  setSelectedTemplateId: (id) => set({ selectedTemplateId: id }),
 }))
 
 export type { Page }

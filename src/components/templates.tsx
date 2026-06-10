@@ -1014,9 +1014,10 @@ export default function TemplatesPage() {
                       size="sm"
                       className="gap-1.5 h-8 text-xs bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
                       onClick={() => {
-                        const { setCurrentPage } = useAppStore.getState()
-                        setCurrentPage('live-display')
-                        toast.success('Template selected', { description: `Using "${template.name}" — go to Live Display to start capturing.` })
+                        const store = useAppStore.getState()
+                        store.setSelectedTemplateId(template.id)
+                        store.setCurrentPage('live-display')
+                        toast.success('Template selected', { description: `Using "${template.name}" — opening Live Display.` })
                       }}
                     >
                       <Camera className="size-3.5" />
@@ -1193,13 +1194,25 @@ export default function TemplatesPage() {
                   </span>
                   <div className="flex items-center gap-1">
                     <Button
+                      size="sm"
+                      className="gap-1 h-7 text-xs bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                      onClick={() => {
+                        const store = useAppStore.getState()
+                        store.setSelectedTemplateId(template.id)
+                        store.setCurrentPage('live-display')
+                        toast.success('Template selected', { description: `Using "${template.name}" — opening Live Display.` })
+                      }}
+                    >
+                      <Camera className="size-3" />
+                      Use
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       className="gap-1 h-7 text-xs"
                       onClick={() => openEdit(template)}
                     >
                       <Pencil className="size-3" />
-                      Edit
                     </Button>
                     <Button
                       variant="ghost"
@@ -1209,7 +1222,6 @@ export default function TemplatesPage() {
                       disabled={duplicateMutation.isPending}
                     >
                       <Copy className="size-3" />
-                      Copy
                     </Button>
                     <Button
                       variant="ghost"
@@ -1219,7 +1231,6 @@ export default function TemplatesPage() {
                       disabled={toggleActiveMutation.isPending}
                     >
                       {template.active ? <XCircle className="size-3" /> : <CheckCircle2 className="size-3" />}
-                      {template.active ? 'Deactivate' : 'Activate'}
                     </Button>
                     <Button
                       variant="ghost"

@@ -217,6 +217,24 @@ export default function LiveDisplay() {
     return []
   }, [templatesData])
 
+  // ── Auto-select template from store (set by Templates page "Use Template" button) ──
+  const selectedTemplateIdFromStore = useAppStore((s) => s.selectedTemplateId)
+  const setSelectedTemplateIdInStore = useAppStore((s) => s.setSelectedTemplateId)
+  useEffect(() => {
+    if (selectedTemplateIdFromStore && templates.length > 0 && !selectedTemplate) {
+      const found = templates.find((t) => t.id === selectedTemplateIdFromStore)
+      if (found) {
+        setSelectedTemplate(found)
+        setTemplatePhotos([])
+        setShowComposite(false)
+        setCompositeImage(null)
+        toast.success('Template loaded', { description: `Using "${found.name}"` })
+      }
+      // Clear the store so it doesn't re-apply on every re-render
+      setSelectedTemplateIdInStore(null)
+    }
+  }, [selectedTemplateIdFromStore, templates, selectedTemplate])
+
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
