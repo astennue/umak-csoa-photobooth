@@ -26,6 +26,7 @@ export async function GET(
       where: { id },
       include: {
         event: { select: { id: true, name: true, organizationId: true } },
+        template: { select: { id: true, name: true, stripImageUrl: true, layout: true, placeholders: true } },
         _count: { select: { queueEntries: true, gallery: true } },
       },
     });
@@ -71,7 +72,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { guestName, guestEmail, guestPhone, status, notes } = body;
+    const { guestName, guestEmail, guestPhone, status, notes, templateId } = body;
 
     if (guestName !== undefined && (typeof guestName !== 'string' || guestName.trim() === '')) {
       return errorResponse('Guest name must be a non-empty string', 400);
@@ -88,6 +89,7 @@ export async function PUT(
     if (guestEmail !== undefined) updateData.guestEmail = guestEmail?.trim() || null;
     if (guestPhone !== undefined) updateData.guestPhone = guestPhone?.trim() || null;
     if (notes !== undefined) updateData.notes = notes?.trim() || null;
+    if (templateId !== undefined) updateData.templateId = templateId?.trim() || null;
     if (status) {
       updateData.status = status;
       if (status === 'IN_PROGRESS' && !existing.startedAt) updateData.startedAt = new Date();
@@ -100,7 +102,10 @@ export async function PUT(
     const session = await db.session.update({
       where: { id },
       data: updateData,
-      include: { event: { select: { id: true, name: true } } },
+      include: {
+        event: { select: { id: true, name: true } },
+        template: { select: { id: true, name: true, stripImageUrl: true, layout: true, placeholders: true } },
+      },
     });
 
     return successResponse(session);

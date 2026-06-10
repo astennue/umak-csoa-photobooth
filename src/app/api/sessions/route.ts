@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: 'desc' },
         include: {
           event: { select: { id: true, name: true, organizationId: true } },
+          template: { select: { id: true, name: true, stripImageUrl: true, layout: true, placeholders: true } },
           _count: { select: { queueEntries: true, gallery: true } },
         },
       }),
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { eventId, guestName, guestEmail, guestPhone, status, notes } = body;
+    const { eventId, guestName, guestEmail, guestPhone, status, notes, templateId } = body;
 
     if (!eventId || typeof eventId !== 'string' || eventId.trim() === '') {
       return errorResponse('Event ID is required', 400);
@@ -85,10 +86,14 @@ export async function POST(request: NextRequest) {
         guestPhone: guestPhone?.trim() || null,
         status: status || 'SCHEDULED',
         notes: notes?.trim() || null,
+        templateId: templateId?.trim() || null,
         ...(status === 'IN_PROGRESS' && { startedAt: new Date() }),
         ...(status === 'COMPLETED' && { startedAt: new Date(), completedAt: new Date() }),
       },
-      include: { event: { select: { id: true, name: true } } },
+      include: {
+        event: { select: { id: true, name: true } },
+        template: { select: { id: true, name: true, stripImageUrl: true, layout: true, placeholders: true } },
+      },
     });
 
     return successResponse(session, 201);

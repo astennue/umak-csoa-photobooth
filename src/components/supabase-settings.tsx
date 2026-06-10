@@ -121,15 +121,7 @@ export default function SupabaseSettings() {
   )
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your application configuration and integrations.
-        </p>
-      </div>
-
-      <Card>
+    <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -273,6 +265,5 @@ export default function SupabaseSettings() {
           )}
         </CardContent>
       </Card>
-    </div>
   )
 }

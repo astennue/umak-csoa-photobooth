@@ -52,14 +52,24 @@ import {
   Pencil,
   ChevronLeft,
   ChevronRight,
-  Search,
+  LayoutTemplate,
+  X,
 } from 'lucide-react'
+import Image from 'next/image'
 
 // --- Types ---
 interface SessionEvent {
   id: string
   name: string
   organizationId: string
+}
+
+interface SessionTemplate {
+  id: string
+  name: string
+  stripImageUrl: string | null
+  layout: string | null
+  placeholders: string | null
 }
 
 interface Session {
@@ -70,16 +80,25 @@ interface Session {
   guestPhone: string | null
   status: string
   notes: string | null
+  templateId: string | null
   startedAt: string | null
   completedAt: string | null
   createdAt: string
   event: SessionEvent
+  template: SessionTemplate | null
   _count: { queueEntries: number; gallery: number }
 }
 
 interface EventOption {
   id: string
   name: string
+}
+
+interface TemplateOption {
+  id: string
+  name: string
+  stripImageUrl: string | null
+  layout: string | null
 }
 
 interface PaginatedResponse {
@@ -127,6 +146,37 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// --- Template Preview Component ---
+function TemplatePreview({ template }: { template: TemplateOption | null }) {
+  if (!template) return null
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20">
+      {template.stripImageUrl ? (
+        <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded border border-emerald-200 dark:border-emerald-700">
+          <Image
+            src={template.stripImageUrl}
+            alt={template.name}
+            fill
+            className="object-cover"
+            sizes="40px"
+          />
+        </div>
+      ) : (
+        <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-100/50 dark:bg-emerald-900/30">
+          <LayoutTemplate className="size-5 text-emerald-500 dark:text-emerald-400" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium truncate">{template.name}</p>
+        {template.layout && (
+          <p className="text-xs text-muted-foreground">Layout: {template.layout}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // --- Form state ---
 interface SessionFormData {
   eventId: string
@@ -135,6 +185,7 @@ interface SessionFormData {
   guestPhone: string
   notes: string
   status: string
+  templateId: string
 }
 
 const emptyForm: SessionFormData = {
@@ -144,6 +195,7 @@ const emptyForm: SessionFormData = {
   guestPhone: '',
   notes: '',
   status: 'SCHEDULED',
+  templateId: '',
 }
 
 // --- Main Component ---
@@ -195,9 +247,22 @@ export default function SessionsPage() {
     retry: 2,
   })
 
+  // Fetch templates for selector
+  const { data: templatesData } = useQuery<{ success: boolean; data: TemplateOption[] }>({
+    queryKey: ['templates-list-select', currentRole, currentOrgId],
+    queryFn: () => fetch('/api/templates?limit=100').then(r => r.json()),
+    retry: 2,
+  })
+
   const events = eventsData?.data || []
+  const templates = templatesData?.data || []
   const sessions = sessionsData?.data || []
   const totalPages = Math.ceil((sessionsData?.total || 0) / limit)
+
+  // Find the selected template object for preview
+  const selectedTemplateForPreview = form.templateId
+    ? templates.find(t => t.id === form.templateId) || null
+    : null
 
   // Mutations
   const createMutation = useMutation({
@@ -293,6 +358,7 @@ export default function SessionsPage() {
         guestPhone: form.guestPhone,
         notes: form.notes,
         status: form.status,
+        templateId: form.templateId,
       },
     })
   }
@@ -306,6 +372,7 @@ export default function SessionsPage() {
       guestPhone: session.guestPhone || '',
       notes: session.notes || '',
       status: session.status,
+      templateId: session.templateId || '',
     })
     setEditOpen(true)
   }
@@ -422,6 +489,7 @@ export default function SessionsPage() {
                       <TableHead className="hidden md:table-cell">Email</TableHead>
                       <TableHead className="hidden lg:table-cell">Phone</TableHead>
                       <TableHead>Event</TableHead>
+                      <TableHead className="hidden md:table-cell">Template</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="hidden md:table-cell">Started At</TableHead>
                       <TableHead className="hidden lg:table-cell">Completed At</TableHead>
@@ -429,26 +497,44 @@ export default function SessionsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sessions.map((session) => (
-                      <TableRow key={session.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
-                        <TableCell className="font-medium">{session.guestName}</TableCell>
+                    {sessions.map((s) => (
+                      <TableRow key={s.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20">
+                        <TableCell className="font-medium">{s.guestName}</TableCell>
                         <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
-                          {session.guestEmail || '—'}
+                          {s.guestEmail || '—'}
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
-                          {session.guestPhone || '—'}
+                          {s.guestPhone || '—'}
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm">{session.event?.name || '—'}</span>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-sm">{s.event?.name || '—'}</span>
+                            {s.template && (
+                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/30 dark:text-teal-400 dark:border-teal-800">
+                                <LayoutTemplate className="size-3 mr-0.5" />
+                                {s.template.name}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {s.template ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/30 dark:text-teal-400 dark:border-teal-800">
+                              <LayoutTemplate className="size-3 mr-0.5" />
+                              {s.template.name}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={session.status} />
+                          <StatusBadge status={s.status} />
                         </TableCell>
                         <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
-                          {formatDate(session.startedAt)}
+                          {formatDate(s.startedAt)}
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
-                          {formatDate(session.completedAt)}
+                          {formatDate(s.completedAt)}
                         </TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu>
@@ -459,27 +545,27 @@ export default function SessionsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openEdit(session)}>
+                              <DropdownMenuItem onClick={() => openEdit(s)}>
                                 <Pencil className="size-4 mr-2" />
                                 Edit Session
                               </DropdownMenuItem>
-                              {allowedTransitions(session.status).includes('IN_PROGRESS') && (
-                                <DropdownMenuItem onClick={() => handleStatusAction(session.id, 'IN_PROGRESS')}>
+                              {allowedTransitions(s.status).includes('IN_PROGRESS') && (
+                                <DropdownMenuItem onClick={() => handleStatusAction(s.id, 'IN_PROGRESS')}>
                                   <Play className="size-4 mr-2" />
                                   Start Session
                                 </DropdownMenuItem>
                               )}
-                              {allowedTransitions(session.status).includes('COMPLETED') && (
-                                <DropdownMenuItem onClick={() => handleStatusAction(session.id, 'COMPLETED')}>
+                              {allowedTransitions(s.status).includes('COMPLETED') && (
+                                <DropdownMenuItem onClick={() => handleStatusAction(s.id, 'COMPLETED')}>
                                   <CheckCircle2 className="size-4 mr-2" />
                                   Complete Session
                                 </DropdownMenuItem>
                               )}
-                              {allowedTransitions(session.status).includes('CANCELLED') && (
+                              {allowedTransitions(s.status).includes('CANCELLED') && (
                                 <>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    onClick={() => handleStatusAction(session.id, 'CANCELLED')}
+                                    onClick={() => handleStatusAction(s.id, 'CANCELLED')}
                                     className="text-destructive focus:text-destructive"
                                   >
                                     <XCircle className="size-4 mr-2" />
@@ -529,7 +615,7 @@ export default function SessionsPage() {
 
       {/* Create Session Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create Session</DialogTitle>
             <DialogDescription>Add a new photobooth session for an event.</DialogDescription>
@@ -577,6 +663,36 @@ export default function SessionsPage() {
               />
             </div>
             <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="create-template">Template</Label>
+                {form.templateId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => setForm(f => ({ ...f, templateId: '' }))}
+                  >
+                    <X className="size-3 mr-0.5" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <Select value={form.templateId || '__none__'} onValueChange={(v) => setForm(f => ({ ...f, templateId: v === '__none__' ? '' : v }))}>
+                <SelectTrigger id="create-template">
+                  <SelectValue placeholder="No template (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No template</SelectItem>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}{t.layout ? ` (${t.layout})` : ''}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTemplateForPreview && (
+                <TemplatePreview template={selectedTemplateForPreview} />
+              )}
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="create-notes">Notes</Label>
               <Textarea
                 id="create-notes"
@@ -600,7 +716,7 @@ export default function SessionsPage() {
 
       {/* Edit Session Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Session</DialogTitle>
             <DialogDescription>Update session details and status.</DialogDescription>
@@ -637,6 +753,36 @@ export default function SessionsPage() {
                 onChange={(e) => setForm(f => ({ ...f, guestPhone: e.target.value }))}
                 placeholder="+1 (555) 000-0000"
               />
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="edit-template">Template</Label>
+                {form.templateId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => setForm(f => ({ ...f, templateId: '' }))}
+                  >
+                    <X className="size-3 mr-0.5" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <Select value={form.templateId || '__none__'} onValueChange={(v) => setForm(f => ({ ...f, templateId: v === '__none__' ? '' : v }))}>
+                <SelectTrigger id="edit-template">
+                  <SelectValue placeholder="No template (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No template</SelectItem>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}{t.layout ? ` (${t.layout})` : ''}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTemplateForPreview && (
+                <TemplatePreview template={selectedTemplateForPreview} />
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-status">Status</Label>

@@ -11,10 +11,17 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+  _props: { params: Promise<{ path: string[] }> }
+) {
   try {
+    // CRITICAL: Do NOT await _props.params - it hangs in Next.js 16 catch-all routes.
+    // Extract path from URL instead.
     const url = new URL(request.url)
     const prefix = '/api/tmp-files/'
     const urlPath = url.pathname.startsWith(prefix)
@@ -26,6 +33,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not Found' }, { status: 404 })
     }
 
+    // Build the requested file path from segments
     const relativePath = pathSegments.join('/')
 
     // Security: reject path traversal attempts
@@ -33,15 +41,17 @@ export async function GET(request: NextRequest) {
       return new NextResponse('Forbidden', { status: 403 })
     }
 
+    // Construct the full file path under /tmp/photobooth-uploads
     const filePath = path.join(TMP_DIR, relativePath)
 
-    // Security: ensure within /tmp/photobooth-uploads
+    // Security: ensure the resolved path is within the /tmp/photobooth-uploads directory
     const resolvedPath = path.resolve(filePath)
-    const resolvedDir = path.resolve(TMP_DIR)
-    if (!resolvedPath.startsWith(resolvedDir + path.sep) && resolvedPath !== resolvedDir) {
+    const resolvedTmpDir = path.resolve(TMP_DIR)
+    if (!resolvedPath.startsWith(resolvedTmpDir + path.sep) && resolvedPath !== resolvedTmpDir) {
       return new NextResponse('Forbidden', { status: 403 })
     }
 
+    // Check if file exists and is a file
     if (!existsSync(filePath)) {
       return NextResponse.json({ error: 'Not Found' }, { status: 404 })
     }
@@ -55,8 +65,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not Found' }, { status: 404 })
     }
 
+    // Determine content type from extension
     const ext = path.extname(filePath).toLowerCase()
     const contentType = MIME_TYPES[ext] || 'application/octet-stream'
+
+    // Read the file synchronously to avoid async issues
     const fileBuffer = readFileSync(filePath)
 
     return new NextResponse(fileBuffer, {
@@ -64,11 +77,12 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(fileBuffer.length),
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        // Shorter cache for /tmp files since they're ephemeral
+        'Cache-Control': 'public, max-age=3600',
       },
     })
   } catch (error) {
-    console.error('[Tmp-Files API] Error:', error)
+    console.error('[Tmp-Files API] Error serving file:', error)
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

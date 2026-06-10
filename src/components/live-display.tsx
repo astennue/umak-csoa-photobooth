@@ -178,6 +178,7 @@ export default function LiveDisplay() {
   const [printingPhoto, setPrintingPhoto] = useState(false)
   const [autoCaptureStep, setAutoCaptureStep] = useState(0)
   const [autoCaptureTotal, setAutoCaptureTotal] = useState(0)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
 
   const allBackgrounds = useMemo(
     () => [...BUILT_IN_BACKGROUNDS, ...customBackgrounds],
@@ -1503,6 +1504,18 @@ export default function LiveDisplay() {
               <Camera className="size-5" />
               Start Camera
             </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => setShowTemplateModal(true)}
+              className="gap-2 border-white/20 text-white hover:bg-white/10 hover:text-white text-sm px-6 h-12 rounded-full"
+            >
+              <LayoutTemplate className="size-4" />
+              Choose Template
+              {selectedTemplate && (
+                <span className="text-emerald-400 text-xs font-medium">({selectedTemplate.name})</span>
+              )}
+            </Button>
           </div>
         ) : (
           <>
@@ -1614,16 +1627,34 @@ export default function LiveDisplay() {
                     <span className="text-xs font-medium text-red-200">AI Separation Failed</span>
                   </div>
                 )}
-                {/* Template indicator */}
+                {/* Template indicator & info bar */}
                 {selectedTemplate && (
                   <div className="flex items-center gap-1.5 rounded-full bg-emerald-700/80 px-3 py-1">
                     <LayoutTemplate className="size-3 text-white" />
                     <span className="text-xs font-medium text-white">{selectedTemplate.name}</span>
+                    {selectedTemplate.layout && (
+                      <span className="text-[10px] font-semibold text-emerald-200 bg-emerald-900/60 rounded px-1">
+                        {selectedTemplate.layout}
+                      </span>
+                    )}
+                    <span className="text-[10px] font-medium text-emerald-200">
+                      {selectedTemplate.captureMode === 'auto' ? 'Auto' : 'Manual'}
+                    </span>
                     <span className="text-xs text-emerald-200">
                       {templatePhotos.length}/{templatePlaceholders.length}
                     </span>
                   </div>
                 )}
+                {/* Choose Template button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white/80 hover:text-white hover:bg-white/20 h-9 w-9 rounded-full"
+                  onClick={() => setShowTemplateModal(true)}
+                  title="Choose Template"
+                >
+                  <LayoutTemplate className="size-4" />
+                </Button>
               </div>
 
               {/* Top-right controls */}
@@ -2152,6 +2183,141 @@ export default function LiveDisplay() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Template Selection Modal ── */}
+      <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal}>
+        <DialogContent className="bg-stone-950 border-white/10 text-white max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <LayoutTemplate className="size-5" />
+              Choose Template
+            </DialogTitle>
+            <DialogDescription className="text-stone-400">
+              Select a photo strip template for your session. Each template defines the layout and capture mode.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Template grid */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.15) transparent' }}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-2">
+              {/* No Template option */}
+              <button
+                onClick={() => {
+                  selectTemplate(null)
+                  setShowTemplateModal(false)
+                  toast.info('Template removed')
+                }}
+                className={`flex flex-col rounded-xl border-2 p-3 transition-all duration-150 cursor-pointer text-left ${
+                  !selectedTemplate
+                    ? 'border-emerald-400 bg-emerald-400/10 shadow-lg shadow-emerald-400/10'
+                    : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'
+                }`}
+              >
+                <div className="aspect-[2/3] w-full rounded-lg overflow-hidden flex items-center justify-center border border-white/10 bg-stone-800 mb-2 relative">
+                  <X className="size-8 text-white/30" />
+                  {!selectedTemplate && (
+                    <div className="absolute top-1.5 right-1.5 size-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <Check className="size-3 text-white" />
+                    </div>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-white truncate">No Template</span>
+                <span className="text-[11px] text-stone-400 mt-0.5">Free capture mode</span>
+              </button>
+
+              {/* Template cards */}
+              {templates.map((tpl) => {
+                const isActive = selectedTemplate?.id === tpl.id
+                const phCount = parsePlaceholders(tpl.placeholders).length
+                return (
+                  <button
+                    key={tpl.id}
+                    onClick={() => {
+                      selectTemplate(tpl)
+                      setShowTemplateModal(false)
+                      toast.success(`Template "${tpl.name}" selected`)
+                    }}
+                    className={`flex flex-col rounded-xl border-2 p-3 transition-all duration-150 cursor-pointer text-left ${
+                      isActive
+                        ? 'border-emerald-400 bg-emerald-400/10 shadow-lg shadow-emerald-400/10'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    {/* Preview thumbnail */}
+                    <div className="aspect-[2/3] w-full rounded-lg overflow-hidden border border-white/10 bg-stone-800 mb-2 relative">
+                      {tpl.stripImageUrl ? (
+                        <img
+                          src={tpl.stripImageUrl}
+                          alt={tpl.name}
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <LayoutTemplate className="size-8 text-white/20" />
+                        </div>
+                      )}
+                      {/* Active indicator */}
+                      {isActive && (
+                        <div className="absolute top-1.5 right-1.5 size-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-md">
+                          <Check className="size-3 text-white" />
+                        </div>
+                      )}
+                      {/* Auto badge */}
+                      {tpl.captureMode === 'auto' && (
+                        <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-full bg-amber-500/90 px-1.5 py-0.5">
+                          <Play className="size-2.5 text-white" />
+                          <span className="text-[9px] font-bold text-white">AUTO</span>
+                        </div>
+                      )}
+                      {/* Inactive badge */}
+                      {tpl.active === false && (
+                        <div className="absolute bottom-1.5 left-1.5 flex items-center gap-0.5 rounded-full bg-red-600/90 px-1.5 py-0.5">
+                          <Ban className="size-2.5 text-white" />
+                          <span className="text-[9px] font-bold text-white">OFF</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Template info */}
+                    <span className="text-sm font-medium text-white truncate">{tpl.name}</span>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {tpl.layout && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white/10 text-stone-300">
+                          {tpl.layout}
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        tpl.captureMode === 'auto'
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-white/10 text-stone-400'
+                      }`}>
+                        {tpl.captureMode === 'auto' ? 'Auto' : 'Manual'}
+                      </span>
+                      {phCount > 0 && (
+                        <span className="text-[10px] text-stone-500">
+                          {phCount} photo{phCount > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {/* Description */}
+                    {tpl.description && (
+                      <p className="text-[11px] text-stone-500 mt-1 line-clamp-2">{tpl.description}</p>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Empty state */}
+            {templates.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <LayoutTemplate className="size-12 text-stone-600 mb-3" />
+                <p className="text-sm text-stone-400">No templates available</p>
+                <p className="text-xs text-stone-500 mt-1">Create templates from the Templates page first.</p>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

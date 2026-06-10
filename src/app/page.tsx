@@ -65,7 +65,7 @@ import UsersPage from '@/components/users'
 import LoginPage from '@/components/login-page'
 import LiveDisplayPage from '@/components/live-display'
 import VirtualBackgroundPage from '@/components/virtual-background'
-import SupabaseSettings from '@/components/supabase-settings'
+import SettingsPage from '@/components/settings-page'
 
 type NavItem = { page: Page; label: string; icon: React.ComponentType<{ className?: string }> }
 
@@ -307,7 +307,7 @@ function PageContent() {
     devices: DevicesPage,
     audit: AuditLogPage,
     users: UsersPage,
-    settings: SupabaseSettings,
+    settings: SettingsPage,
   }
 
   const CurrentPageComponent = pages[currentPage] ?? DashboardPage
