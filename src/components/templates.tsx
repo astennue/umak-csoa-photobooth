@@ -783,13 +783,17 @@ export default function TemplatesPage() {
       }
 
       const json = await res.json()
-      if (!json.success) throw new Error(json.error || 'Upload failed')
+      const errMsg = typeof json.error === 'string'
+        ? json.error
+        : (json.error?.message || JSON.stringify(json.error) || 'Upload failed')
+      if (!json.success) throw new Error(errMsg)
 
       setForm((f) => ({ ...f, stripImageUrl: json.data.url }))
       toast.success('Image uploaded')
     } catch (err: any) {
       console.error('Upload error:', err)
-      toast.error('Upload failed', { description: err.message })
+      const errMsg = typeof err === 'string' ? err : (err?.message || 'Upload failed')
+      toast.error('Upload failed', { description: errMsg })
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''

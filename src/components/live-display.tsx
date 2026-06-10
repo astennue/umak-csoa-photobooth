@@ -1288,10 +1288,14 @@ export default function LiveDisplay() {
           printWindow.document.close()
         }
       } else {
-        toast.error('Print failed: ' + (json.error || 'Unknown error'))
+        const errMsg = typeof json.error === 'string'
+          ? json.error
+          : (json.error?.message || json.error?.error || JSON.stringify(json.error) || 'Unknown error')
+        toast.error('Print failed: ' + errMsg)
       }
-    } catch {
-      toast.error('Failed to send print job')
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to send print job'
+      toast.error('Print failed: ' + errMsg)
     } finally {
       setPrintingPhoto(false)
     }
@@ -1321,10 +1325,14 @@ export default function LiveDisplay() {
         toast.success('Photo sent to email!', { duration: 3000 })
         setShowEmailInput(false)
       } else {
-        toast.error('Email failed: ' + (json.error || 'Unknown error'))
+        const errMsg = typeof json.error === 'string'
+          ? json.error
+          : (json.error?.message || json.error?.error || JSON.stringify(json.error) || 'Unknown error')
+        toast.error('Email failed: ' + errMsg)
       }
-    } catch {
-      toast.error('Failed to send email')
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to send email'
+      toast.error('Email failed: ' + errMsg)
     } finally {
       setSendingEmail(false)
     }
