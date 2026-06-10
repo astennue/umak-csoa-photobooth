@@ -1065,17 +1065,8 @@ export default function LiveDisplay() {
 
     // Determine canvas dimensions from the strip image's natural size
     const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
-    const resolveAndDraw = (stripW: number, stripH: number) => {
-      canvas.width = stripW
-      canvas.height = stripH
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
 
-      // Draw strip background (white default)
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, stripW, stripH)
-
-    const doComposite = () => {
+    const doComposite = (ctx: CanvasRenderingContext2D, stripW: number, stripH: number) => {
       // Draw each captured photo into its placeholder
       placeholders.forEach((ph: PlaceholderDef, i: number) => {
         const photoDataUrl = templatePhotos[i]
@@ -1114,57 +1105,67 @@ export default function LiveDisplay() {
       })
     }
 
-    // If template has strip image, draw it first
-    const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
-    if (stripUrl) {
-      const stripImg = new Image()
-      stripImg.crossOrigin = 'anonymous'
-      stripImg.onload = () => {
-        ctx.drawImage(stripImg, 0, 0, stripW, stripH)
-        doComposite()
-
-        // Draw overlay if exists
-        if (selectedTemplate.overlayUrl) {
-          const overlayImg = new Image()
-          overlayImg.crossOrigin = 'anonymous'
-          overlayImg.onload = () => {
-            ctx.drawImage(overlayImg, 0, 0, stripW, stripH)
-            // Wait for photos to render, then output
-            setTimeout(() => {
-              const dataUrl = canvas.toDataURL('image/png')
-              setCompositeImage(dataUrl)
-              setShowComposite(true)
-              onCompositeReady(dataUrl)
-            }, 500)
-          }
-          overlayImg.src = selectedTemplate.overlayUrl
-        } else {
-          setTimeout(() => {
-            const dataUrl = canvas.toDataURL('image/png')
-            setCompositeImage(dataUrl)
-            setShowComposite(true)
-            onCompositeReady(dataUrl)
-          }, 500)
-        }
-      }
-      stripImg.onerror = () => {
-        doComposite()
-        setTimeout(() => {
-          const dataUrl = canvas.toDataURL('image/png')
-          setCompositeImage(dataUrl)
-          setShowComposite(true)
-          onCompositeReady(dataUrl)
-        }, 500)
-      }
-      stripImg.src = stripUrl
-    } else {
-      doComposite()
+    const finalizeComposite = () => {
       setTimeout(() => {
         const dataUrl = canvas.toDataURL('image/png')
         setCompositeImage(dataUrl)
         setShowComposite(true)
         onCompositeReady(dataUrl)
       }, 500)
+    }
+
+    // If template has strip image, load it first to get dimensions and draw as background
+    if (stripUrl) {
+      const stripImg = new Image()
+      stripImg.crossOrigin = 'anonymous'
+      stripImg.onload = () => {
+        canvas.width = stripImg.naturalWidth || DEFAULT_STRIP_WIDTH
+        canvas.height = stripImg.naturalHeight || DEFAULT_STRIP_HEIGHT
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+
+        // Draw strip background (white default)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+        // Draw the strip template image
+        ctx.drawImage(stripImg, 0, 0, canvas.width, canvas.height)
+        doComposite(ctx, canvas.width, canvas.height)
+
+        // Draw overlay if exists
+        if (selectedTemplate.overlayUrl) {
+          const overlayImg = new Image()
+          overlayImg.crossOrigin = 'anonymous'
+          overlayImg.onload = () => {
+            ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height)
+            finalizeComposite()
+          }
+          overlayImg.src = selectedTemplate.overlayUrl
+        } else {
+          finalizeComposite()
+        }
+      }
+      stripImg.onerror = () => {
+        // Fallback: use default dimensions
+        canvas.width = DEFAULT_STRIP_WIDTH
+        canvas.height = DEFAULT_STRIP_HEIGHT
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        doComposite(ctx, canvas.width, canvas.height)
+        finalizeComposite()
+      }
+      stripImg.src = stripUrl
+    } else {
+      canvas.width = DEFAULT_STRIP_WIDTH
+      canvas.height = DEFAULT_STRIP_HEIGHT
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      doComposite(ctx, canvas.width, canvas.height)
+      finalizeComposite()
     }
   }, [selectedTemplate, templatePhotos])
 
@@ -2077,11 +2078,11 @@ export default function LiveDisplay() {
 
           {/* Composite image preview */}
           {compositeImage && (
-            <div className="rounded-lg overflow-hidden border border-white/10 bg-stone-900">
+            <div className="rounded-lg overflow-hidden border border-white/10 bg-stone-900 flex items-center justify-center p-2">
               <img
                 src={compositeImage}
                 alt="Photo strip composite"
-                className="w-full h-auto max-h-[50vh] object-contain"
+                className="max-w-full max-h-[50vh] w-auto h-auto"
               />
             </div>
           )}
@@ -2265,12 +2266,12 @@ export default function LiveDisplay() {
                     }`}
                   >
                     {/* Preview thumbnail */}
-                    <div className="aspect-[2/3] w-full rounded-lg overflow-hidden border border-white/10 bg-stone-800 mb-2 relative">
+                    <div className="w-full rounded-lg overflow-hidden border border-white/10 bg-stone-800 mb-2 relative flex items-center justify-center" style={{ aspectRatio: '2/3' }}>
                       {tpl.stripImageUrl ? (
                         <img
                           src={tpl.stripImageUrl}
                           alt={tpl.name}
-                          className="absolute inset-0 w-full h-full object-cover"
+                          className="max-w-full max-h-full w-auto h-auto object-contain"
                         />
                       ) : (
                         <div className="absolute inset-0 flex items-center justify-center">

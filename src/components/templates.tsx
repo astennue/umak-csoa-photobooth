@@ -388,8 +388,8 @@ function PlaceholderCanvas({
   return (
     <div
       ref={canvasRef}
-      className="relative w-full border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
-      style={{ aspectRatio: imageAspect }}
+      className="relative max-w-full mx-auto border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
+      style={{ aspectRatio: imageAspect, maxHeight: '520px' }}
       onClick={handleCanvasClick}
     >
       {/* Strip Image Background */}
@@ -397,7 +397,7 @@ function PlaceholderCanvas({
         <img
           src={stripImageUrl}
           alt="Strip design"
-          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          className="absolute inset-0 w-full h-full object-fill pointer-events-none"
           draggable={false}
           onLoad={(e) => {
             const img = e.currentTarget
@@ -491,14 +491,14 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
 
   return (
     <div
-      className="relative w-full bg-muted/50 rounded-md overflow-hidden"
-      style={{ aspectRatio: imageAspect }}
+      className="relative max-w-full mx-auto bg-muted/50 rounded-md overflow-hidden"
+      style={{ aspectRatio: imageAspect, maxHeight: '280px' }}
     >
       {imageUrl ? (
         <img
           src={imageUrl}
           alt={template.name}
-          className="absolute inset-0 w-full h-full object-contain"
+          className="absolute inset-0 w-full h-full object-fill"
           draggable={false}
           onLoad={(e) => {
             const img = e.currentTarget
@@ -1448,12 +1448,12 @@ export default function TemplatesPage() {
 
                   {form.stripImageUrl ? (
                     <div className="space-y-3">
-                      <div className="relative rounded-lg overflow-hidden border bg-muted/30 flex items-center justify-center">
+                      <div className="relative rounded-lg overflow-hidden border bg-muted/30 flex items-center justify-center p-2">
                         <img
                           src={form.stripImageUrl}
                           alt="Strip design"
-                          className="max-w-full object-contain"
-                          style={{ maxHeight: '300px' }}
+                          className="max-h-[300px] w-auto h-auto"
+                          style={{ maxWidth: '100%', objectFit: 'contain' }}
                         />
                         <Button
                           variant="destructive"
