@@ -2,8 +2,6 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse, paginateRequest, getSearchParams } from '@/lib/api-utils';
 import { getAuthContext, canAccessOrg, getOrgScope } from '@/lib/auth';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
 import { randomUUID } from 'crypto';
 
 /**
@@ -33,23 +31,33 @@ function parseDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string; exte
 }
 
 /**
- * Save a base64 dataUrl to the public/gallery folder and return the public path.
+ * Upload a base64 dataUrl to Supabase Storage and return the public URL.
+ * Falls back to returning the dataUrl directly if Supabase is not configured.
  */
-function saveDataUrlToGallery(dataUrl: string): string {
+async function uploadDataUrlToStorage(dataUrl: string): Promise<{ url: string; storage: 'supabase' | 'dataurl' }> {
   const parsed = parseDataUrl(dataUrl);
   const timestamp = Date.now();
   const uniqueId = randomUUID().slice(0, 8);
   const fileName = `${timestamp}-${uniqueId}.${parsed.extension}`;
 
-  const galleryDir = join(process.cwd(), 'public', 'gallery');
-  if (!existsSync(galleryDir)) {
-    mkdirSync(galleryDir, { recursive: true });
+  try {
+    const { isSupabaseConfigured, uploadFile } = await import('@/lib/supabase-storage');
+    if (await isSupabaseConfigured()) {
+      const result = await uploadFile(parsed.buffer, fileName, 'gallery', parsed.mimeType);
+      console.log('[Gallery API] Supabase upload successful:', result.url);
+      return { url: result.url, storage: 'supabase' };
+    }
+  } catch (supabaseErr: any) {
+    console.error('[Gallery API] Supabase upload failed:', supabaseErr?.message);
+    throw new Error(
+      `Upload to Supabase Storage failed: ${supabaseErr?.message || 'Unknown error'}. ` +
+      'Please check your Supabase configuration in Settings > Storage.'
+    );
   }
 
-  const filePath = join(galleryDir, fileName);
-  writeFileSync(filePath, parsed.buffer);
-
-  return `/gallery/${fileName}`;
+  // Supabase not configured — return the dataUrl as-is (not ideal for large images)
+  console.warn('[Gallery API] Supabase Storage not configured — using dataUrl fallback');
+  return { url: dataUrl, storage: 'dataurl' };
 }
 
 export async function GET(request: NextRequest) {
@@ -154,11 +162,12 @@ export async function POST(request: NextRequest) {
     // Determine the final photo URL
     let finalPhotoUrl: string;
     if (photoDataUrl && typeof photoDataUrl === 'string' && photoDataUrl.startsWith('data:')) {
-      // Save base64 dataUrl to public/gallery and use the path
+      // Upload base64 dataUrl to Supabase Storage and use the public URL
       try {
-        finalPhotoUrl = saveDataUrlToGallery(photoDataUrl);
-      } catch (saveErr: any) {
-        return errorResponse(saveErr.message || 'Failed to save photo from dataUrl', 400);
+        const uploadResult = await uploadDataUrlToStorage(photoDataUrl);
+        finalPhotoUrl = uploadResult.url;
+      } catch (uploadErr: any) {
+        return errorResponse(uploadErr.message || 'Failed to upload photo from dataUrl', 400);
       }
     } else if (photoUrl && photoUrl.trim() !== '') {
       finalPhotoUrl = photoUrl.trim();

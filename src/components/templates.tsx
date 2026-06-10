@@ -386,34 +386,36 @@ function PlaceholderCanvas({
   }, [placeholders, getPercentage, onUpdatePlaceholders])
 
   return (
-    <div
-      ref={canvasRef}
-      className="relative max-w-full mx-auto border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
-      style={{ aspectRatio: imageAspect, maxHeight: '520px' }}
-      onClick={handleCanvasClick}
-    >
-      {/* Strip Image Background */}
-      {stripImageUrl ? (
-        <img
-          src={stripImageUrl}
-          alt="Strip design"
-          className="absolute inset-0 w-full h-full object-fill pointer-events-none"
-          draggable={false}
-          onLoad={(e) => {
-            const img = e.currentTarget
-            if (img.naturalWidth && img.naturalHeight) {
-              setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
-            }
-          }}
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center text-muted-foreground/50">
-            <ImageIcon className="size-12 mx-auto mb-2" />
-            <p className="text-sm">Upload a strip design</p>
+    <div className="flex justify-center">
+      <div
+        ref={canvasRef}
+        className="relative border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
+        style={!stripImageUrl ? { aspectRatio: imageAspect, maxHeight: '520px', width: '100%' } : undefined}
+        onClick={handleCanvasClick}
+      >
+        {/* Strip Image Background */}
+        {stripImageUrl ? (
+          <img
+            src={stripImageUrl}
+            alt="Strip design"
+            className="block max-h-[520px] max-w-full w-auto object-contain pointer-events-none"
+            style={{ aspectRatio: imageAspect }}
+            draggable={false}
+            onLoad={(e) => {
+              const img = e.currentTarget
+              if (img.naturalWidth && img.naturalHeight) {
+                setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+              }
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center text-muted-foreground/50">
+              <ImageIcon className="size-12 mx-auto mb-2" />
+              <p className="text-sm">Upload a strip design</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Placeholders */}
       {placeholders.map((p, i) => (
@@ -474,6 +476,7 @@ function PlaceholderCanvas({
           )}
         </div>
       ))}
+      </div>
     </div>
   )
 }
@@ -490,40 +493,43 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
   const [imageAspect, setImageAspect] = useState<string>('2/3')
 
   return (
-    <div
-      className="relative max-w-full mx-auto bg-muted/50 rounded-md overflow-hidden"
-      style={{ aspectRatio: imageAspect, maxHeight: '280px' }}
-    >
-      {imageUrl ? (
-        <img
-          src={imageUrl}
-          alt={template.name}
-          className="absolute inset-0 w-full h-full object-fill"
-          draggable={false}
-          onLoad={(e) => {
-            const img = e.currentTarget
-            if (img.naturalWidth && img.naturalHeight) {
-              setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
-            }
-          }}
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Frame className="size-8 text-muted-foreground/40" />
-        </div>
-      )}
-      {placeholders.map((p, i) => (
-        <div
-          key={i}
-          className="absolute border border-emerald-500/50 bg-emerald-500/10 rounded-[2px]"
-          style={{
-            left: `${p.x}%`,
-            top: `${p.y}%`,
-            width: `${p.width}%`,
-            height: `${p.height}%`,
-          }}
-        />
-      ))}
+    <div className="flex justify-center">
+      <div
+        className="relative bg-muted/50 rounded-md overflow-hidden"
+        style={!imageUrl ? { aspectRatio: imageAspect, maxHeight: '280px', width: '100%' } : undefined}
+      >
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={template.name}
+            className="block max-h-[280px] max-w-full w-auto object-contain"
+            style={{ aspectRatio: imageAspect }}
+            draggable={false}
+            onLoad={(e) => {
+              const img = e.currentTarget
+              if (img.naturalWidth && img.naturalHeight) {
+                setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+              }
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Frame className="size-8 text-muted-foreground/40" />
+          </div>
+        )}
+        {placeholders.map((p, i) => (
+          <div
+            key={i}
+            className="absolute border border-emerald-500/50 bg-emerald-500/10 rounded-[2px]"
+            style={{
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              width: `${p.width}%`,
+              height: `${p.height}%`,
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }

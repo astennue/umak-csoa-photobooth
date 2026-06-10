@@ -2,8 +2,6 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/api-utils';
 import { getAuthContext } from '@/lib/auth';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
 import { randomUUID } from 'crypto';
 
 /**
@@ -55,33 +53,42 @@ export async function POST(request: NextRequest) {
     // Parse the dataUrl
     let photoBuffer: Buffer;
     let photoExtension: string;
+    let photoMimeType: string;
     try {
       const parsed = parseDataUrl(photoDataUrl);
       photoBuffer = parsed.buffer;
       photoExtension = parsed.extension;
+      photoMimeType = parsed.mimeType;
     } catch (parseErr: any) {
       return errorResponse(parseErr.message || 'Invalid photo data format', 400);
     }
 
-    // Save the photo to public/gallery for print reference
+    // Upload the photo to Supabase Storage (no local filesystem writes)
     const printJobId = randomUUID();
     const timestamp = Date.now();
     const fileName = `${timestamp}-${printJobId.slice(0, 8)}.${photoExtension}`;
-    const galleryDir = join(process.cwd(), 'public', 'gallery');
+    let photoUrl: string;
 
-    // Ensure directory exists
-    if (!existsSync(galleryDir)) {
-      mkdirSync(galleryDir, { recursive: true });
+    try {
+      const { isSupabaseConfigured, uploadFile } = await import('@/lib/supabase-storage');
+      if (await isSupabaseConfigured()) {
+        const result = await uploadFile(photoBuffer, fileName, 'gallery', photoMimeType);
+        photoUrl = result.url;
+        console.log('[Print API] Photo uploaded to Supabase:', photoUrl);
+      } else {
+        // Supabase not configured — use dataUrl as fallback
+        console.warn('[Print API] Supabase Storage not configured — using dataUrl fallback');
+        photoUrl = photoDataUrl;
+      }
+    } catch (supabaseErr: any) {
+      console.error('[Print API] Supabase upload failed:', supabaseErr?.message);
+      // Fall back to dataUrl so print still works
+      photoUrl = photoDataUrl;
     }
 
-    const filePath = join(galleryDir, fileName);
-    writeFileSync(filePath, photoBuffer);
-
-    const photoUrl = `/gallery/${fileName}`;
     const numCopies = typeof copies === 'number' && copies > 0 ? copies : 1;
 
-    // Log the print job — we can use a simple AuditLog entry or just return
-    // Since there's no dedicated PrintJob model, store as audit log
+    // Log the print job — store as audit log
     try {
       await db.auditLog.create({
         data: {
