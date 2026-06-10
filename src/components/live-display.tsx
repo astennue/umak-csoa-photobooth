@@ -113,8 +113,9 @@ const BUILT_IN_BACKGROUNDS: BackgroundOption[] = [
 
 const DEFAULT_VIDEO_WIDTH = 1280
 const DEFAULT_VIDEO_HEIGHT = 720
-const DEFAULT_STRIP_WIDTH = 1200
+const DEFAULT_STRIP_WIDTH = 600
 const DEFAULT_STRIP_HEIGHT = 1800
+const MAX_CANVAS_PIXELS = 16_000_000 // 16 megapixels max to avoid browser memory issues
 
 /* ------------------------------------------------------------------ */
 /*  Parse placeholders JSON safely                                     */
@@ -1063,21 +1064,30 @@ export default function LiveDisplay() {
     const canvas = compositeCanvasRef.current ?? document.createElement('canvas')
     compositeCanvasRef.current = canvas
 
-    // Determine canvas dimensions from the strip image's natural size
     const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
 
-    // Helper: load an image and return a Promise
-    const loadImage = (src: string, crossOrigin?: string): Promise<HTMLImageElement> => {
+    // Helper: load an image and return a Promise (handles both dataUrl and HTTP URLs)
+    const loadImage = (src: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
         const img = new Image()
-        if (crossOrigin) img.crossOrigin = crossOrigin
-        img.onload = () => resolve(img)
-        img.onerror = () => reject(new Error(`Failed to load image: ${src.substring(0, 80)}`))
+        // Only set crossOrigin for HTTP/HTTPS URLs (not dataUrls)
+        // dataUrls are same-origin by definition and don't need CORS
+        if (src.startsWith('http://') || src.startsWith('https://')) {
+          img.crossOrigin = 'anonymous'
+        }
+        img.onload = () => {
+          console.log(`[Composite] Image loaded: ${img.width}×${img.height}`)
+          resolve(img)
+        }
+        img.onerror = (e) => {
+          console.error(`[Composite] Image load failed:`, e, src.substring(0, 100))
+          reject(new Error(`Failed to load image: ${src.substring(0, 80)}`))
+        }
         img.src = src
       })
     }
 
-    // Draw a single captured photo into its placeholder (cover-fit with optional clip)
+    // Draw a captured photo into its placeholder slot (cover-fit, center-crop)
     const drawPhotoIntoPlaceholder = (
       ctx: CanvasRenderingContext2D,
       img: HTMLImageElement,
@@ -1089,8 +1099,9 @@ export default function LiveDisplay() {
       const py = (ph.y / 100) * stripH
       const pw = (ph.width / 100) * stripW
       const phh = (ph.height / 100) * stripH
-      // borderRadius is stored as a pixel value, not a percentage
       const br = ph.borderRadius ?? 0
+
+      console.log(`[Composite] Drawing photo at: px=${px}, py=${py}, pw=${pw}, phh=${phh}, br=${br}`)
 
       ctx.save()
       if (br > 0) {
@@ -1100,25 +1111,22 @@ export default function LiveDisplay() {
       }
 
       // Cover-fit: center crop the image to fill the placeholder
-      const imgAspect = img.width / img.height
+      const imgW = img.naturalWidth || img.width
+      const imgH = img.naturalHeight || img.height
+      const imgAspect = imgW / imgH
       const slotAspect = pw / phh
-      let sx = 0, sy = 0, sw = img.width, sh = img.height
+      let sx = 0, sy = 0, sw = imgW, sh = imgH
       if (imgAspect > slotAspect) {
-        sw = img.height * slotAspect
-        sx = (img.width - sw) / 2
+        sw = imgH * slotAspect
+        sx = (imgW - sw) / 2
       } else {
-        sh = img.width / slotAspect
-        sy = (img.height - sh) / 2
+        sh = imgW / slotAspect
+        sy = (imgH - sh) / 2
       }
+
+      console.log(`[Composite] Photo crop: sx=${sx}, sy=${sy}, sw=${sw}, sh=${sh}`)
       ctx.drawImage(img, sx, sy, sw, sh, px, py, pw, phh)
       ctx.restore()
-    }
-
-    const finalizeComposite = () => {
-      const dataUrl = canvas.toDataURL('image/png')
-      setCompositeImage(dataUrl)
-      setShowComposite(true)
-      onCompositeReady(dataUrl)
     }
 
     // Main async composite generation
@@ -1126,73 +1134,100 @@ export default function LiveDisplay() {
       let stripW = DEFAULT_STRIP_WIDTH
       let stripH = DEFAULT_STRIP_HEIGHT
 
-      // If template has strip image, load it first to get dimensions and draw as background
+      // If template has strip image, load it first to get dimensions
       if (stripUrl) {
         try {
-          const stripImg = await loadImage(stripUrl, 'anonymous')
+          const stripImg = await loadImage(stripUrl)
           stripW = stripImg.naturalWidth || DEFAULT_STRIP_WIDTH
           stripH = stripImg.naturalHeight || DEFAULT_STRIP_HEIGHT
-
-          canvas.width = stripW
-          canvas.height = stripH
-          const ctx = canvas.getContext('2d')
-          if (!ctx) return
-
-          // Draw strip background (white default)
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, stripW, stripH)
-
-          // Draw the strip template image at its natural dimensions
-          ctx.drawImage(stripImg, 0, 0, stripW, stripH)
-        } catch {
-          // Fallback: use default dimensions
-          canvas.width = DEFAULT_STRIP_WIDTH
-          canvas.height = DEFAULT_STRIP_HEIGHT
-          stripW = DEFAULT_STRIP_WIDTH
-          stripH = DEFAULT_STRIP_HEIGHT
-          const ctx = canvas.getContext('2d')
-          if (!ctx) return
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, stripW, stripH)
+          console.log(`[Composite] Strip image natural size: ${stripW}×${stripH}`)
+        } catch (err) {
+          console.warn('[Composite] Failed to load strip image, using defaults:', err)
         }
-      } else {
-        canvas.width = DEFAULT_STRIP_WIDTH
-        canvas.height = DEFAULT_STRIP_HEIGHT
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, stripW, stripH)
       }
 
-      // Load all captured photos in parallel, then draw them sequentially
+      // Clamp canvas size to avoid browser memory issues
+      const totalPixels = stripW * stripH
+      if (totalPixels > MAX_CANVAS_PIXELS) {
+        const scale = Math.sqrt(MAX_CANVAS_PIXELS / totalPixels)
+        stripW = Math.round(stripW * scale)
+        stripH = Math.round(stripH * scale)
+        console.log(`[Composite] Canvas scaled down to: ${stripW}×${stripH}`)
+      }
+
+      canvas.width = stripW
+      canvas.height = stripH
       const ctx = canvas.getContext('2d')
-      if (!ctx) return
+      if (!ctx) {
+        console.error('[Composite] Failed to get canvas context')
+        return
+      }
 
-      const photoPromises = placeholders.map((ph: PlaceholderDef, i: number) => {
-        const photoDataUrl = templatePhotos[i]
-        if (!photoDataUrl) return Promise.resolve(null)
-        return loadImage(photoDataUrl).catch(() => null)
-      })
+      // Draw white background
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, stripW, stripH)
 
-      const photoImages = await Promise.all(photoPromises)
+      // Draw strip template image as background
+      if (stripUrl) {
+        try {
+          const stripImg = await loadImage(stripUrl)
+          ctx.drawImage(stripImg, 0, 0, stripW, stripH)
+          console.log('[Composite] Strip background drawn')
+        } catch (err) {
+          console.warn('[Composite] Failed to draw strip background:', err)
+        }
+      }
 
-      // Draw each photo into its placeholder (sequential to maintain z-order)
-      photoImages.forEach((img, i) => {
-        if (!img) return
+      // Load ALL captured photos first, then draw them
+      console.log(`[Composite] Loading ${templatePhotos.length} photos...`)
+      const photoResults: (HTMLImageElement | null)[] = []
+      for (let i = 0; i < placeholders.length; i++) {
+        const photoSrc = templatePhotos[i]
+        if (!photoSrc) {
+          console.warn(`[Composite] No photo for slot ${i}`)
+          photoResults.push(null)
+          continue
+        }
+        try {
+          const img = await loadImage(photoSrc)
+          photoResults.push(img)
+          console.log(`[Composite] Photo ${i} loaded: ${img.width}×${img.height}`)
+        } catch (err) {
+          console.error(`[Composite] Photo ${i} failed to load:`, err)
+          photoResults.push(null)
+        }
+      }
+
+      // Draw each photo into its placeholder
+      for (let i = 0; i < photoResults.length; i++) {
+        const img = photoResults[i]
+        if (!img) continue
         drawPhotoIntoPlaceholder(ctx, img, placeholders[i], stripW, stripH)
-      })
+      }
+      console.log('[Composite] All photos drawn')
 
       // Draw overlay if exists
       if (selectedTemplate.overlayUrl) {
         try {
-          const overlayImg = await loadImage(selectedTemplate.overlayUrl, 'anonymous')
+          const overlayImg = await loadImage(selectedTemplate.overlayUrl)
           ctx.drawImage(overlayImg, 0, 0, stripW, stripH)
         } catch {
-          // Skip overlay if it fails to load
+          // Skip overlay if it fails
         }
       }
 
-      finalizeComposite()
+      // Finalize — export canvas to dataUrl
+      try {
+        const dataUrl = canvas.toDataURL('image/png')
+        console.log(`[Composite] Final image size: ${dataUrl.length} chars`)
+        setCompositeImage(dataUrl)
+        setShowComposite(true)
+        onCompositeReady(dataUrl)
+      } catch (err) {
+        console.error('[Composite] toDataURL failed (canvas tainted?):', err)
+        // Canvas might be tainted due to CORS — try to generate without the strip background
+        toast.error('Failed to export composite image. This may be a CORS issue with the template image.')
+      }
     }
 
     runComposite().catch((err) => {
