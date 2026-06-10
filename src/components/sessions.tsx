@@ -54,6 +54,7 @@ import {
   ChevronRight,
   LayoutTemplate,
   X,
+  Radio,
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -202,6 +203,7 @@ const emptyForm: SessionFormData = {
 export default function SessionsPage() {
   const queryClient = useQueryClient()
   const { selectedEventId } = useAppStore()
+  const store = useAppStore()
   const { data: session } = useSession()
   const currentRole = (session?.user as any)?.role as string | undefined
   const currentOrgId = (session?.user as any)?.organizationId as string | undefined
@@ -381,6 +383,27 @@ export default function SessionsPage() {
     patchStatusMutation.mutate({ id, status: newStatus })
   }
 
+  function startSessionAndGoLive(s: Session) {
+    // Set the active session in store (includes guest email for auto-population)
+    store.setActiveSession({
+      id: s.id,
+      guestName: s.guestName,
+      guestEmail: s.guestEmail,
+      eventId: s.eventId,
+      templateId: s.templateId,
+    })
+    // Set the selected event
+    store.setSelectedEventId(s.eventId)
+    // If session has a template, set it for live display
+    if (s.templateId) {
+      store.setSelectedTemplateId(s.templateId)
+    }
+    // Start the session (change status to IN_PROGRESS)
+    patchStatusMutation.mutate({ id: s.id, status: 'IN_PROGRESS' })
+    // Navigate to live display
+    store.setCurrentPage('live-display')
+  }
+
   function formatDate(dateStr: string | null) {
     if (!dateStr) return '—'
     return new Date(dateStr).toLocaleString('en-US', {
@@ -550,9 +573,9 @@ export default function SessionsPage() {
                                 Edit Session
                               </DropdownMenuItem>
                               {allowedTransitions(s.status).includes('IN_PROGRESS') && (
-                                <DropdownMenuItem onClick={() => handleStatusAction(s.id, 'IN_PROGRESS')}>
-                                  <Play className="size-4 mr-2" />
-                                  Start Session
+                                <DropdownMenuItem onClick={() => startSessionAndGoLive(s)}>
+                                  <Radio className="size-4 mr-2" />
+                                  Go Live
                                 </DropdownMenuItem>
                               )}
                               {allowedTransitions(s.status).includes('COMPLETED') && (

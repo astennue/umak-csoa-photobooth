@@ -236,6 +236,13 @@ export default function LiveDisplay() {
     }
   }, [selectedTemplateIdFromStore, templates, selectedTemplate])
 
+  // ── Auto-populate guest email from active session ──
+  useEffect(() => {
+    if (activeSession?.guestEmail && !guestEmail) {
+      setGuestEmail(activeSession.guestEmail)
+    }
+  }, [activeSession?.guestEmail])
+
   // ── Refs ──
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1314,8 +1321,10 @@ export default function LiveDisplay() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: email,
-          subject: `Your UMak CSOA Photobooth Photo${selectedTemplate ? ` - ${selectedTemplate.name}` : ''}`,
-          message: 'Here is your photo from the UMak CSOA Photobooth! Enjoy your memory!',
+          subject: `Your UMak CSOA Photobooth Photo${selectedTemplate ? ` - ${selectedTemplate.name}` : ''}${activeSession?.guestName ? ` (${activeSession.guestName})` : ''}`,
+          message: activeSession?.guestName
+            ? `Hi ${activeSession.guestName}! Here is your photo from the UMak CSOA Photobooth. Enjoy your memory!`
+            : 'Here is your photo from the UMak CSOA Photobooth! Enjoy your memory!',
           photoDataUrl: photoData,
           templateName: selectedTemplate?.name,
           sessionId: activeSession?.id,
@@ -1645,6 +1654,15 @@ export default function LiveDisplay() {
                     </span>
                   </div>
                 )}
+                {/* Active session indicator */}
+                {activeSession && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-teal-700/80 px-3 py-1">
+                    <span className="text-xs font-medium text-white">{activeSession.guestName}</span>
+                    {activeSession.guestEmail && (
+                      <span className="text-[10px] text-teal-200 truncate max-w-[120px]">{activeSession.guestEmail}</span>
+                    )}
+                  </div>
+                )}
                 {/* Choose Template button */}
                 <Button
                   variant="ghost"
@@ -1767,7 +1785,7 @@ export default function LiveDisplay() {
                     <Mail className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-white/40" />
                     <Input
                       type="email"
-                      placeholder="Guest email (optional)"
+                      placeholder={activeSession?.guestEmail || "Guest email (optional)"}
                       value={guestEmail}
                       onChange={(e) => setGuestEmail(e.target.value)}
                       className="h-8 text-xs bg-white/10 border-white/20 text-white placeholder:text-white/40 pl-7 pr-2 rounded-lg"

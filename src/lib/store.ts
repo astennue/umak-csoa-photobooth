@@ -7,8 +7,8 @@ interface AppState {
   setCurrentPage: (page: Page) => void
   selectedEventId: string | null
   setSelectedEventId: (id: string | null) => void
-  activeSession: { id: string; guestName: string; eventId: string } | null
-  setActiveSession: (session: { id: string; guestName: string; eventId: string } | null) => void
+  activeSession: { id: string; guestName: string; guestEmail: string | null; eventId: string; templateId: string | null } | null
+  setActiveSession: (session: { id: string; guestName: string; guestEmail: string | null; eventId: string; templateId: string | null } | null) => void
   // Template selection — used to pass a chosen template from Templates page to Live Display
   selectedTemplateId: string | null
   setSelectedTemplateId: (id: string | null) => void
