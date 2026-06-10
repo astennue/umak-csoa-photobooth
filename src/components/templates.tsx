@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
@@ -204,7 +204,9 @@ function PlaceholderCanvas({
   onUpdatePlaceholders: (placeholders: Placeholder[]) => void
 }) {
   const canvasRef = useRef<HTMLDivElement>(null)
-  const [imageAspect, setImageAspect] = useState<string>('2/3')
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null)
+  const [wrapperWidth, setWrapperWidth] = useState<number>(0)
   const dragState = useRef<{
     type: 'move' | 'resize'
     index: number
@@ -213,6 +215,34 @@ function PlaceholderCanvas({
     origPlaceholder: Placeholder
     corner?: string
   } | null>(null)
+
+  // Track wrapper width for responsive container sizing
+  useEffect(() => {
+    if (!wrapperRef.current) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setWrapperWidth(entry.contentRect.width)
+      }
+    })
+    observer.observe(wrapperRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  // Calculate container dimensions maintaining the image's original aspect ratio
+  // Default: 2 inches × 6 inches (1:3 ratio) for photo strips
+  const MAX_CANVAS_HEIGHT = 520
+  const containerStyle = useMemo((): React.CSSProperties => {
+    const ratio = naturalSize ? naturalSize.w / naturalSize.h : 1 / 3 // default 2×6 = 1:3
+    // Calculate dimensions: start with max height, derive width from aspect ratio
+    let h = MAX_CANVAS_HEIGHT
+    let w = Math.round(h * ratio)
+    // If calculated width exceeds parent, constrain by width instead
+    if (wrapperWidth && w > wrapperWidth) {
+      w = Math.floor(wrapperWidth)
+      h = Math.round(w / ratio)
+    }
+    return { width: `${w}px`, height: `${h}px` }
+  }, [naturalSize, wrapperWidth])
 
   const getPercentage = useCallback((clientX: number, clientY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 }
@@ -386,31 +416,29 @@ function PlaceholderCanvas({
   }, [placeholders, getPercentage, onUpdatePlaceholders])
 
   return (
-    <div className="flex justify-center">
+    <div ref={wrapperRef} className="flex justify-center overflow-hidden">
       <div
         ref={canvasRef}
-        className="relative inline-block max-w-full border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
+        className="relative border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
+        style={containerStyle}
         onClick={handleCanvasClick}
       >
-        {/* Strip Image Background — this element determines the container size */}
+        {/* Strip Image Background */}
         {stripImageUrl ? (
           <img
             src={stripImageUrl}
             alt="Strip design"
-            className="block max-h-[520px] max-w-full object-fill pointer-events-none"
+            className="absolute inset-0 w-full h-full object-fill pointer-events-none"
             draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget
               if (img.naturalWidth && img.naturalHeight) {
-                setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+                setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
               }
             }}
           />
         ) : (
-          <div
-            className="flex items-center justify-center"
-            style={{ aspectRatio: imageAspect, maxHeight: '520px', width: '100%', minWidth: '200px' }}
-          >
+          <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center text-muted-foreground/50">
               <ImageIcon className="size-12 mx-auto mb-2" />
               <p className="text-sm">Upload a strip design</p>
@@ -491,29 +519,41 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
       })()
     : []
   const imageUrl = template.stripImageUrl || template.frameUrl
-  const [imageAspect, setImageAspect] = useState<string>('2/3')
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null)
+
+  // Calculate container dimensions maintaining the image's original aspect ratio
+  // Default: 2 inches × 6 inches (1:3 ratio) for photo strips
+  const MAX_PREVIEW_HEIGHT = 280
+  const getContainerStyle = (): React.CSSProperties => {
+    if (naturalSize) {
+      const ratio = naturalSize.w / naturalSize.h
+      const h = MAX_PREVIEW_HEIGHT
+      const w = Math.round(h * ratio)
+      return { width: `${w}px`, height: `${h}px` }
+    }
+    // No image — default to 2:6 (1:3) photo strip ratio
+    const defaultW = Math.round(MAX_PREVIEW_HEIGHT / 3)
+    return { width: `${defaultW}px`, height: `${MAX_PREVIEW_HEIGHT}px` }
+  }
 
   return (
     <div className="flex justify-center">
-      <div className="relative inline-block max-w-full bg-muted/50 rounded-md overflow-hidden">
+      <div className="relative bg-muted/50 rounded-md overflow-hidden" style={getContainerStyle()}>
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={template.name}
-            className="block max-h-[280px] max-w-full object-fill"
+            className="absolute inset-0 w-full h-full object-fill"
             draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget
               if (img.naturalWidth && img.naturalHeight) {
-                setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+                setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
               }
             }}
           />
         ) : (
-          <div
-            className="flex items-center justify-center"
-            style={{ aspectRatio: imageAspect, maxHeight: '280px', width: '100%', minWidth: '80px' }}
-          >
+          <div className="absolute inset-0 flex items-center justify-center">
             <Frame className="size-8 text-muted-foreground/40" />
           </div>
         )}
