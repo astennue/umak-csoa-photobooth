@@ -204,6 +204,7 @@ function PlaceholderCanvas({
   onUpdatePlaceholders: (placeholders: Placeholder[]) => void
 }) {
   const canvasRef = useRef<HTMLDivElement>(null)
+  const [imageAspect, setImageAspect] = useState<string>('2/3')
   const dragState = useRef<{
     type: 'move' | 'resize'
     index: number
@@ -388,7 +389,7 @@ function PlaceholderCanvas({
     <div
       ref={canvasRef}
       className="relative w-full border-2 border-dashed border-muted-foreground/30 rounded-lg overflow-hidden bg-muted/50 cursor-crosshair"
-      style={{ aspectRatio: '2/3' }}
+      style={{ aspectRatio: imageAspect }}
       onClick={handleCanvasClick}
     >
       {/* Strip Image Background */}
@@ -398,6 +399,12 @@ function PlaceholderCanvas({
           alt="Strip design"
           className="absolute inset-0 w-full h-full object-contain pointer-events-none"
           draggable={false}
+          onLoad={(e) => {
+            const img = e.currentTarget
+            if (img.naturalWidth && img.naturalHeight) {
+              setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+            }
+          }}
         />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -480,11 +487,12 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
       })()
     : []
   const imageUrl = template.stripImageUrl || template.frameUrl
+  const [imageAspect, setImageAspect] = useState<string>('2/3')
 
   return (
     <div
       className="relative w-full bg-muted/50 rounded-md overflow-hidden"
-      style={{ aspectRatio: '2/3' }}
+      style={{ aspectRatio: imageAspect }}
     >
       {imageUrl ? (
         <img
@@ -492,6 +500,12 @@ function MiniTemplatePreview({ template }: { template: TemplateItem }) {
           alt={template.name}
           className="absolute inset-0 w-full h-full object-contain"
           draggable={false}
+          onLoad={(e) => {
+            const img = e.currentTarget
+            if (img.naturalWidth && img.naturalHeight) {
+              setImageAspect(`${img.naturalWidth}/${img.naturalHeight}`)
+            }
+          }}
         />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -1434,11 +1448,11 @@ export default function TemplatesPage() {
 
                   {form.stripImageUrl ? (
                     <div className="space-y-3">
-                      <div className="relative rounded-lg overflow-hidden border bg-muted/30">
+                      <div className="relative rounded-lg overflow-hidden border bg-muted/30 flex items-center justify-center">
                         <img
                           src={form.stripImageUrl}
                           alt="Strip design"
-                          className="w-full object-contain"
+                          className="max-w-full object-contain"
                           style={{ maxHeight: '300px' }}
                         />
                         <Button

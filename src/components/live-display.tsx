@@ -1063,16 +1063,17 @@ export default function LiveDisplay() {
     const canvas = compositeCanvasRef.current ?? document.createElement('canvas')
     compositeCanvasRef.current = canvas
 
-    const stripW = DEFAULT_STRIP_WIDTH
-    const stripH = DEFAULT_STRIP_HEIGHT
-    canvas.width = stripW
-    canvas.height = stripH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    // Determine canvas dimensions from the strip image's natural size
+    const stripUrl = selectedTemplate.stripImageUrl || selectedTemplate.frameUrl
+    const resolveAndDraw = (stripW: number, stripH: number) => {
+      canvas.width = stripW
+      canvas.height = stripH
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
 
-    // Draw strip background (white default)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, stripW, stripH)
+      // Draw strip background (white default)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, stripW, stripH)
 
     const doComposite = () => {
       // Draw each captured photo into its placeholder
